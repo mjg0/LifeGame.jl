@@ -83,7 +83,7 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 **<details><summary>More</summary>**
 
-Sparse grids (where about 90% `128×62`-cell "chunks" of the grid are devoid of life) can be updated even faster:
+Sparse grids (where about 90% of `128×62`-cell "chunks" of the grid are devoid of life) can be updated even faster:
 
 ![Benchmark results, sparse](img/benchmark-results-sparse.png)
 
