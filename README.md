@@ -151,7 +151,8 @@ for (density, serial_ops, parallel_ops) in (("dense", dense_serial_ops, dense_pa
     plot( lengths, serial_ops, title="Cell updates per nanosecond ($density)",
           label="serial", xlabel="LifeGrid side length", ylabel="Updates/ns",
           legend_position=:topleft, marker=:circle, markerstrokewidth=0,
-          xscale=:log10, xticks=(lengths, lengths), size=(600, 400))
+          xscale=:log10, xticks=(lengths, lengths), xrotation=45,
+          margin=(5, :mm), size=(600, 400))
     plot!(lengths, parallel_ops, label="parallel", marker=:circle, markerstrokewidth=0)
     png("benchmark-results-$density.png")
 end
