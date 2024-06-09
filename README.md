@@ -44,7 +44,7 @@ You only really need to know 2 methods to use `LifeGame.jl`:
   - `LifeGame(grid)`: create a grid from `grid`, where non-zero or true cells are alive.
 - `step!(lifegrid)`: update `lifegrid` once.
 
-`LifeGrid`s are `AbstractArray`s, so you can index one you would expect:
+`LifeGrid`s are `AbstractArray`s, so you can index one as you would expect:
 
 ```julia
 mygrid = LifeGrid([0 1 1 0
@@ -83,7 +83,7 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 **<details><summary>More</summary>**
 
-Sparse grids (where about 90% `62×128`-cell "chunks" of the grid are devoid of life) can be updated even faster:
+Sparse grids (where about 90% `128×62`-cell "chunks" of the grid are devoid of life) can be updated even faster:
 
 ![Benchmark results, sparse](img/benchmark-results-sparse.png)
 
@@ -151,7 +151,7 @@ for (density, serial_ops, parallel_ops) in (("dense", dense_serial_ops, dense_pa
     plot( lengths, serial_ops, title="Cell updates per nanosecond ($density)",
           label="serial", xlabel="LifeGrid side length", ylabel="Updates/ns",
           legend_position=:topleft, marker=:circle, markerstrokewidth=0,
-          xscale=:log10, xticks=(lengths, lengths), size=(800, 600))
+          xscale=:log10, xticks=(lengths, lengths), size=(600, 400))
     plot!(lengths, parallel_ops, label="parallel", marker=:circle, markerstrokewidth=0)
     png("benchmark-results-$density.png")
 end
