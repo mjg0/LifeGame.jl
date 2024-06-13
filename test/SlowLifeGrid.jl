@@ -1,3 +1,7 @@
+using LifeGame # since we overload LifeGame.step!
+
+
+
 # Basic life grid implementation against which to test LifeGrid
 mutable struct SlowLifeGrid <: AbstractMatrix{Bool}
     grid::Matrix{Bool}
@@ -21,14 +25,13 @@ Base.@propagate_inbounds Base.setindex!(lg::SlowLifeGrid, x...) = setindex!(lg.g
 
 # Update a SlowLifeGrid
 function LifeGame.step!(lg::SlowLifeGrid)
+    # Iterate over the whole grid
     R = CartesianIndices(lg.grid)
     @inbounds @simd for I in R
         # Sum the living neighbors (including the cell in question) of the current cell
-        alivecount = 0
-        for cell in max(first(R), I-oneunit(I)):min(last(R), I+oneunit(I))
-            if lg.grid[cell]
-                alivecount += 1
-            end
+        alivecount = zero(UInt8)
+        for neighbor in max(first(R), I-oneunit(I)):min(last(R), I+oneunit(I))
+            alivecount += reinterpret(UInt8, lg.grid[neighbor])
         end
 
         # Update the cell
