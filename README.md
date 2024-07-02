@@ -4,6 +4,8 @@
 
 Only fixed boundary conditions--considering all cells outside of the finite grid to be dead--are available [for now](#future-work).
 
+[Here](https://youtu.be/DehyzMiwDwY) is a [presentation](https://docs.google.com/presentation/d/1D52NkO1bAx7DJG9WCElswsvsZ4wDRSYU_7lufQqEku8/edit?usp=sharing) that I gave for a friend's students which explains some of the optimzation choices made when creating `LifeGame.jl`.
+
 ## Simple
 
 `LifeGame.jl` is easy to use:
