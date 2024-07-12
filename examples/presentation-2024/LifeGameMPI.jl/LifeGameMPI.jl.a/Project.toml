@@ -1,0 +1,9 @@
+name = "LifeGameMPI"
+uuid = "c91d476a-64cc-4c48-b82c-fd21d199d759"
+authors = ["micgre93 <michaeljgreenburg@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+LifeGame = "699e2175-2ccb-4b83-83e3-62ae42f966df"
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+MPIPreferences = "3da0fdf6-3ccc-4f1b-acd9-58baa6c99267"
