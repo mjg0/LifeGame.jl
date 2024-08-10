@@ -1,15 +1,20 @@
-using LifeGame # since we overload LifeGame.step!
+using LifeGame # LifeGame.LifeRule, LifeGame.step!
 
 
 
 # Basic life grid implementation against which to test LifeGrid
 mutable struct SlowLifeGrid <: AbstractMatrix{Bool}
-    grid::Matrix{Bool}
-    next::Matrix{Bool}
+    grid::Matrix{UInt8} # the grid itself
+    next::Matrix{UInt8} # area to store intermediate results
+    birthsums::Vector{Int}    # list of neighbor sums that lead to cell birth
+    survivalsums::Vector{Int} # list of neighbor sums that allow cell survival
 
-    SlowLifeGrid(height, width) = new(zeros(height, width), zeros(height, width))
+    function SlowLifeGrid(height, width; rule="B3/S23")
+        birthsums, survivalsums = LifeGame.rulesums(LifeGame.LifeRule(rule))
+        return new(zeros(height, width), zeros(height, width), birthsums, survivalsums)
+    end
 
-    SlowLifeGrid(grid) = SlowLifeGrid(size(grid)...) .= grid
+    SlowLifeGrid(grid; kw...) = SlowLifeGrid(size(grid)...; kw...) .= grid
 end
 
 
@@ -17,25 +22,30 @@ end
 # Implement AbstractArray interface for SlowLifeGrid
 Base.size(lg::SlowLifeGrid) = size(lg.grid)
 
-Base.@propagate_inbounds Base.getindex( lg::SlowLifeGrid, x...) = getindex( lg.grid, x...)
+Base.@propagate_inbounds function Base.getindex( lg::SlowLifeGrid, x...)
+    return reinterpret(Bool, getindex( lg.grid, x...))
+end
 
-Base.@propagate_inbounds Base.setindex!(lg::SlowLifeGrid, x...) = setindex!(lg.grid, x...)
+Base.@propagate_inbounds function Base.setindex!(lg::SlowLifeGrid, x...)
+    return reinterpret(Bool, setindex!(lg.grid, x...))
+end
 
 
 
 # Update a SlowLifeGrid
 function LifeGame.step!(lg::SlowLifeGrid)
     # Iterate over the whole grid
-    R = CartesianIndices(lg.grid)
-    @inbounds @simd for I in R
-        # Sum the living neighbors (including the cell in question) of the current cell
-        alivecount = zero(UInt8)
-        for neighbor in max(first(R), I-oneunit(I)):min(last(R), I+oneunit(I))
-            alivecount += reinterpret(UInt8, lg.grid[neighbor])
-        end
+    region = CartesianIndices(lg.grid)
+    @inbounds @simd for I in region
+        # Sum the living neighbors (excluding the cell in question) of the current cell
+        neighborhood = max(first(region), I-oneunit(I)):min(last(region), I+oneunit(I))
+        neighborsum = sum(n->lg.grid[n], neighborhood) - lg.grid[I]
 
-        # Update the cell
-        lg.next[I] = alivecount == 3 || alivecount == 4 && lg.grid[I]
+        # Kill cells that shouldn't survive
+        lg.next[I] = neighborsum in lg.survivalsums ? lg.grid[I] : 0x00
+
+        # Spawn cells that should be born
+        lg.next[I] = neighborsum in    lg.birthsums ? 0x01       : lg.next[I]
     end
 
     # Swap current and next grids and return the updated SlowLifeGrid

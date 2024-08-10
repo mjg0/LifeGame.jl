@@ -7,7 +7,8 @@ include("SlowLifeGrid.jl")
 # Tests
 @testset "LifeGame" begin
     @testset "LifeGrid construction" begin
-        @test (LifeGrid(2, 3) == LifeGrid([0 0 0; 0 0 0])
+        @test (LifeGrid(2, 3) == LifeGrid(2, 3; rule="B3/S23")
+                              == LifeGrid([0 0 0; 0 0 0])
                               == LifeGrid(zeros(Bool, 2, 3))
                               == LifeGrid(BitArray([0 0 0; 0 0 0])))
         @test all(LifeGrid([0 1 1 0; 1 1 0 0; 0 1 0 1]) .==
@@ -52,11 +53,12 @@ include("SlowLifeGrid.jl")
 
     @testset "updatedcluster" begin
         # Test with some fixed values that have been calculated by hand
+        rule = LifeGame.LifeRule((3,), (2, 3))
         for (above, middle, below, result) in ((0b1100, 0b1000, 0b0000, 0b1100),
                                                (0b0100, 0b0100, 0b0100, 0b1110),
                                                (0b0010, 0b1010, 0b0110, 0b0011),
                                                (0b1000, 0b0110, 0b1100, 0b0010))
-            @test LifeGame.updatedcluster(above, middle, below) == result
+            @test LifeGame.updatedcluster(above, middle, below, rule) == result
         end
     end
 
@@ -78,25 +80,60 @@ include("SlowLifeGrid.jl")
         @test_throws BoundsError insert!(LifeGrid(4, 5), 2, 4, LifePattern([1 1 1]))
     end
 
-    @testset "step!" for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 251))
-        # Initialize slow and fast grids randomly, with 1/4 of cells starting alive
-        grid = rand((false, false, false, true), x, y)
-        slowgrid = SlowLifeGrid(grid)
-        fastgrid_dense_serial    = LifeGrid(grid)
-        fastgrid_sparse_serial   = LifeGrid(grid)
-        fastgrid_dense_parallel  = LifeGrid(grid)
-        fastgrid_sparse_parallel = LifeGrid(grid)
-        # Make sure results are identical over 10 steps
-        for _ in 1:10
-            step!(slowgrid)
-            step!(fastgrid_dense_serial,    sparse=false)
-            step!(fastgrid_sparse_serial,   sparse=true)
-            step!(fastgrid_dense_parallel,  sparse=false, chunklength=8, parallel=true)
-            step!(fastgrid_sparse_parallel, sparse=true,  chunklength=8, parallel=true)
-            @test all(slowgrid .== fastgrid_dense_serial
-                               .== fastgrid_sparse_serial
-                               .== fastgrid_dense_parallel
-                               .== fastgrid_sparse_parallel)
+    @testset "step!" begin
+        # Test popular rules and rules that used to cause problems for the sparse algorithm
+        for rule in ("B3/S23", "B36/S23", "B3678/S34678", "B2/S", "B3/S56", "B37/S357")
+            @testset "rule $rule" begin
+                for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 251))
+                    # Initialize slow and fast grids randomly, with about 1/4 of cells alive
+                    grid = rand((false, false, false, true), x, y)
+                    slowgrid = SlowLifeGrid(grid; rule=rule)
+                    grid_dense_serial    = LifeGrid(grid; rule=rule)
+                    grid_sparse_serial   = LifeGrid(grid; rule=rule)
+                    grid_dense_parallel  = LifeGrid(grid; rule=rule)
+                    grid_sparse_parallel = LifeGrid(grid; rule=rule)
+                    # Make sure results are identical over 100 steps
+                    for _ in 1:100
+                        step!(slowgrid)
+                        step!(grid_dense_serial,    sparse=false)
+                        step!(grid_sparse_serial,   sparse=true)
+                        step!(grid_dense_parallel,  sparse=false, chunklength=8, parallel=true)
+                        step!(grid_sparse_parallel, sparse=true,  chunklength=8, parallel=true)
+                        @test all(slowgrid .== grid_dense_serial
+                                           .== grid_sparse_serial
+                                           .== grid_dense_parallel
+                                           .== grid_sparse_parallel)
+                    end
+                end
+            end
         end
     end
+
+    # @testset "step!" for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 251))
+    #     # Test 25 rules, including the default B3/S23
+    #     birthrules =    [(3,  ); [(i for i in 1:8 if rand(Bool)) for _ in 1:4]]
+    #     survivalrules = [(2, 3); [(i for i in 1:8 if rand(Bool)) for _ in 1:4]]
+    #     for birth in birthrules, survival in survivalrules
+    #         rule = repr(LifeGame.LifeRule(birth, survival))
+    #         # Initialize slow and fast grids randomly, with 1/4 of cells starting alive
+    #         grid = rand((false, false, false, true), x, y)
+    #         slowgrid = SlowLifeGrid(grid; rule=rule)
+    #         fastgrid_dense_serial    = LifeGrid(grid; rule=rule)
+    #         fastgrid_sparse_serial   = LifeGrid(grid; rule=rule)
+    #         fastgrid_dense_parallel  = LifeGrid(grid; rule=rule)
+    #         fastgrid_sparse_parallel = LifeGrid(grid; rule=rule)
+    #         # Make sure results are identical over 5 steps
+    #         for _ in 1:5
+    #             step!(slowgrid)
+    #             step!(fastgrid_dense_serial,    sparse=false)
+    #             step!(fastgrid_sparse_serial,   sparse=true)
+    #             step!(fastgrid_dense_parallel,  sparse=false, chunklength=8, parallel=true)
+    #             step!(fastgrid_sparse_parallel, sparse=true,  chunklength=8, parallel=true)
+    #             @test all(slowgrid .== fastgrid_dense_serial
+    #                                .== fastgrid_sparse_serial
+    #                                .== fastgrid_dense_parallel
+    #                                .== fastgrid_sparse_parallel)
+    #         end
+    #     end
+    # end
 end # @testset
