@@ -81,59 +81,30 @@ include("SlowLifeGrid.jl")
     end
 
     @testset "step!" begin
-        # Test popular rules and rules that used to cause problems for the sparse algorithm
-        for rule in ("B3/S23", "B36/S23", "B3678/S34678", "B2/S", "B3/S56", "B37/S357")
+        # Test popular rules
+        for rule in ("B3/S23",       # Conway's
+                     "B36/S23",      # high life
+                     "B3678/S34678", # day and night
+                     "B35678/S5678", # diamoeba
+                     "B2/S",         # seeds
+                     "B234/S",       # Persian rug
+                     "B345/S5")      # long life
             @testset "rule $rule" begin
                 for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 256))
                     # Initialize slow and fast grids randomly, with about 1/4 of cells alive
                     grid = rand((false, false, false, true), x, y)
-                    slowgrid = SlowLifeGrid(grid; rule=rule)
-                    grid_dense_serial    = LifeGrid(grid; rule=rule)
-                    grid_sparse_serial   = LifeGrid(grid; rule=rule)
-                    grid_dense_parallel  = LifeGrid(grid; rule=rule)
-                    grid_sparse_parallel = LifeGrid(grid; rule=rule)
+                    slowgrid =  SlowLifeGrid(grid; rule=rule)
+                    grid_serial   = LifeGrid(grid; rule=rule)
+                    grid_parallel = LifeGrid(grid; rule=rule)
                     # Make sure results are identical over 10 steps
                     for _ in 1:10
                         step!(slowgrid)
-                        step!(grid_dense_serial,    dense=true)
-                        step!(grid_sparse_serial,   dense=false)
-                        step!(grid_dense_parallel,  dense=true,  chunklength=8, parallel=true)
-                        step!(grid_sparse_parallel, dense=false, chunklength=8, parallel=true)
-                        @test all(slowgrid .== grid_dense_serial
-                                           .== grid_sparse_serial
-                                           .== grid_dense_parallel
-                                           .== grid_sparse_parallel)
+                        step!(grid_serial)
+                        step!(grid_parallel, chunklength=8, parallel=true)
+                        @test all(slowgrid .== grid_serial .== grid_parallel)
                     end
                 end
             end
         end
     end
-
-    # @testset "step!" for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 251))
-    #     # Test 25 rules, including the default B3/S23
-    #     birthrules =    [(3,  ); [(i for i in 1:8 if rand(Bool)) for _ in 1:4]]
-    #     survivalrules = [(2, 3); [(i for i in 1:8 if rand(Bool)) for _ in 1:4]]
-    #     for birth in birthrules, survival in survivalrules
-    #         rule = repr(LifeGame.LifeRule(birth, survival))
-    #         # Initialize slow and fast grids randomly, with 1/4 of cells starting alive
-    #         grid = rand((false, false, false, true), x, y)
-    #         slowgrid = SlowLifeGrid(grid; rule=rule)
-    #         fastgrid_dense_serial    = LifeGrid(grid; rule=rule)
-    #         fastgrid_sparse_serial   = LifeGrid(grid; rule=rule)
-    #         fastgrid_dense_parallel  = LifeGrid(grid; rule=rule)
-    #         fastgrid_sparse_parallel = LifeGrid(grid; rule=rule)
-    #         # Make sure results are identical over 5 steps
-    #         for _ in 1:5
-    #             step!(slowgrid)
-    #             step!(fastgrid_dense_serial,    sparse=false)
-    #             step!(fastgrid_sparse_serial,   sparse=true)
-    #             step!(fastgrid_dense_parallel,  sparse=false, chunklength=8, parallel=true)
-    #             step!(fastgrid_sparse_parallel, sparse=true,  chunklength=8, parallel=true)
-    #             @test all(slowgrid .== fastgrid_dense_serial
-    #                                .== fastgrid_sparse_serial
-    #                                .== fastgrid_dense_parallel
-    #                                .== fastgrid_sparse_parallel)
-    #         end
-    #     end
-    # end
 end # @testset

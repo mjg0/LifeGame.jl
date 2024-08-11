@@ -103,11 +103,7 @@ function updatedcluster(above, current, below, ::LifeRule{B, S}) where {B, S}
     return current
 end
 
-
-
-#=
-# An example of specializing updatedcluster for a particular rule (B3/S23)
-# This doesn't seem to be needed, the compiler does great at optimizing the generic version
+# updatedcluster specialization for B3/S23 (Conway's life)
 function updatedcluster(above, current, below, ::LifeRule{Rule(3), Rule(2, 3)})
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
@@ -128,4 +124,9 @@ function updatedcluster(above, current, below, ::LifeRule{Rule(3, 6), Rule(2, 3)
 
     return current
 end
-=#
+
+# updatedcluster specialization for B2/S (seeds)
+function updatedcluster(above, current, below, ::LifeRule{Rule(2), Rule()})
+    bit1, bit2, bit3, bit4 = bitsums(above, current, below)
+    return ~bit1 & bit2 & ~bit3 & ~bit4
+end

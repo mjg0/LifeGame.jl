@@ -59,10 +59,9 @@ works.
 
 `step!` is written to compile to highly vectorized instructions, uses CPU caches
 efficiently, and is parallelized. On a laptop with an AMD 7640U, it typically takes about
-250 μs to `step!` a dense 10,000×10,000 `LifeGrid`, and 50 ms to `step!` a dense
-100,000×100,000 `LifeGrid`. Since keeping the CPU fed is a major bottleneck when update
-operations are so fast, `step!` operates faster per cell when the grid it's working on fits
-in the CPU cache.
+300 μs to `step!` a 10,000×10,000 `LifeGrid`, and 50 ms to `step!` a 100,000×100,000
+`LifeGrid`. Since keeping the CPU fed is a major bottleneck when update operations are so
+fast, `step!` operates faster per cell when the grid it's working on fits in the CPU cache.
 """
 module LifeGame
 
@@ -79,6 +78,8 @@ const CELLS_PER_CLUSTER = 8*sizeof(CLUSTER_TYPE)-2 # subtract 2 for halos at cel
 const FIRST_BIT = CLUSTER_TYPE(2)<<CELLS_PER_CLUSTER # 0b100...000
 
 const LAST_BIT = one(CLUSTER_TYPE)                   # 0b000...001
+
+const DEFAULT_CHUNK_SIZE = 64
 
 
 

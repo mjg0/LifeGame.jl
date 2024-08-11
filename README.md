@@ -81,83 +81,48 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 `LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on modern hardware. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes with 4 Julia threads on a laptop with an AMD 7640U:
 
-![Benchmark results, dense](img/benchmark-results-dense.png)
+![Benchmark results, dense](img/benchmark-results.png)
 
 **<details><summary>More</summary>**
 
-Sparse grids (where about 90% of `128×62`-cell "chunks" of the grid are devoid of life) can be updated even faster:
-
-![Benchmark results, sparse](img/benchmark-results-sparse.png)
-
 Such performance is attained by packing 62 cells into 64-bit operands and updating them simultaneously using bitwise operations; see the extended help for `LifeGrid`, `LifeGame.updatedcluster`, and `LifeGame.stepraw!` for algorithm details.
 
-The plots above were generated thus:
+The plot above was generated thus:
 
 ```julia
-using LifeGame, BenchmarkTools, DataFrames, Plots
+using LifeGame, BenchmarkTools, Plots
 
-# DataFrame to hold benchmarking data
-benchmarkdata = DataFrame(density=Symbol[], parallel=Bool[], sidelength=Int[],
-                          meantime=Float64[])
+# Side lengths to test
+sidelengths = 2 .^(4:18)
 
-# Test both serial and parallel speeds
-for parallel in (false, true)
-    # Warm up the CPU
-    time1 = time()
-    while time()-time1 < 60 # Give it a minute to warm up
-        step!(LifeGrid(rand(Bool, 1000, 1000)), parallel=parallel)
+# Test in serial and parallel
+serialresults, parallelresults = (begin
+    # Warm up the CPU for 1 minute
+    t = time()
+    while time()-t < 60
+        step!(LifeGrid(1000, 1000), parallel=parallel)
     end
+    # Get results for every side length
+    [begin
+        # Free up memory
+        GC.gc()
+        # Create the grid
+        lg = LifeGrid(sidelength, sidelength)
+        # Get and return results
+        chunklength = parallel ? min(cld(sidelength, Threads.nthreads()), 64) : 64
+        result = @benchmark step!($lg, parallel=$parallel, chunklength=$chunklength)
+        sidelength^2/mean(result.times)
+    end for sidelength in sidelengths]
+end for parallel in (false, true))
 
-    # Run both sparse and dense benchmarks for many sizes
-    for sidelen in 2 .^(4:18)
-        # Force parallelism even when the default is to avoid it at small sizes
-        chunklen = parallel ? min(128, cld(sidelen, Threads.nthreads())) : 128
-
-        # Construct and sparsely fill the grid
-        lg = LifeGrid(sidelen, sidelen)
-        for i in 1:128*62*10:length(lg) # this will leave about 90% of chunks untouched
-            lg[i:i+2] .= true # insert a blinker
-        end
-
-        # Get sparse results
-        sparse_results = @benchmark step!($lg, parallel=$parallel, chunklength=$chunklen)
-        push!(benchmarkdata, (:sparse, parallel, sidelen, mean(sparse_results.times)))
-
-        # Densify the grid a bit; most chunks will now have several living cells
-        i = rand(1:chunklen)
-        while i < length(lg)-2
-            lg[i:i+2] .= true # insert a blinker
-            i += chunklen÷2 + rand(1:chunklen)
-        end
-
-        # Get dense results
-        dense_results = @benchmark step!($lg, parallel=$parallel, chunklength=$chunklen)
-        push!(benchmarkdata, (:dense, parallel, sidelen, mean(dense_results.times)))
-    end
-end
-
-# Determine operations per nanosecond for each permutation
-lengths = subset(benchmarkdata, :density=>d->d.==:dense, :parallel=>p->p.==true).sidelength
-dense_serial_ops, sparse_serial_ops, dense_parallel_ops, sparse_parallel_ops = (
-    lengths.^2 ./ subset(benchmarkdata, :density=>d->d.==density,
-                                        :parallel=>p->p.==parallel).meantime
-    for (density, parallel) in ((:dense,  false),
-                                (:sparse, false),
-                                (:dense,  true ),
-                                (:sparse, true ))
-)
-
-# Plot timing data
-for (density, serial_ops, parallel_ops) in (("dense", dense_serial_ops, dense_parallel_ops),
-                                            ("sparse", sparse_serial_ops, sparse_parallel_ops))
-    plot( lengths, serial_ops, title="Cell updates per nanosecond ($density)",
-          label="serial", xlabel="LifeGrid side length", ylabel="Updates/ns",
-          legend_position=:topleft, marker=:circle, markerstrokewidth=0,
-          xscale=:log10, xticks=(lengths, lengths), xrotation=45,
-          margin=(5, :mm), size=(600, 400))
-    plot!(lengths, parallel_ops, label="parallel", marker=:circle, markerstrokewidth=0)
-    png("benchmark-results-$density.png")
-end
+# Plot and save results
+plot(sidelengths, serialresults, title="Cell updates per nanosecond",
+     label="serial", xlabel="LifeGrid side length", ylabel="Updates/ns",
+     legend_position=:topleft, marker=:circle, markerstrokewidth=0,
+     xscale=:log10, xticks=(sidelengths, sidelengths), xrotation=45,
+     margin=(5, :mm), size=(600, 400))
+plot!(sidelengths, parallelresults, label="parallel", marker=:circle, markerstrokewidth=0)
+png("benchmark-results.png")
 ```
 
 </details>
@@ -173,5 +138,7 @@ end
 - Allowing for infinite grids by dynamically creating extra grids when cells cross into unmapped regions would be interesting, but [Hashlife](https://en.wikipedia.org/wiki/Hashlife) is probably a better choice for such use cases.
 
 - This style of implementation is amenable to GPU acceleration.
+
+- A sparse algorithm that actually works could be worthwhile
 
 **Issues and pull requests are welcome!**

@@ -110,8 +110,8 @@ True and non-zero values indicate living cells; false and zero values indicate d
 mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
     width::Int64
     grid::Matrix{CLUSTER_TYPE}
-    leftcolbuffer::Vector{CLUSTER_TYPE}   # used in step!
-    middlecolbuffer::Vector{CLUSTER_TYPE} # used in step!
+    colbuffer1::Vector{CLUSTER_TYPE} # used in step!
+    colbuffer2::Vector{CLUSTER_TYPE} # used in step!
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
@@ -121,11 +121,10 @@ mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
         grid = zeros(CLUSTER_TYPE, paddedheight, paddedpackedwidth)
 
         # Buffers
-        lcbuf = zeros(CLUSTER_TYPE, paddedheight)
-        mcbuf = deepcopy(lcbuf)
+        buffer = zeros(CLUSTER_TYPE, paddedheight)
 
         # Return the LifeGrid
-        return new{LifeRule(rule)}(n, grid, lcbuf, mcbuf)
+        return new{LifeRule(rule)}(n, grid, buffer, deepcopy(buffer))
     end
 
     function LifeGrid(grid::BitArray; kw...)
@@ -181,6 +180,22 @@ Return the simulation rule governing `lg`'s evolution.
 rule(::LifeGrid{R}) where R = R
 
 
-rulesums(N) = [i for i in 1:8 if N>>(i-1)&0x01==0x01]
+
+"""
+    rulesums(N::Integer)
+    rulesums(::Rule{N})
+    rulesums(::LifeRule{B, S})
+
+Return a vector of numbers for which the given rule specifies birth or survival.
+
+`N` is a `UInt8`, each bit corresponding to a number 1 to 8; the numbers corresponding to on
+bits are returned.
+
+If a `LifeRule` is provided, the birth and survival sums, respectively, are returned as a
+tuple.
+"""
+rulesums(N::Integer) = [i for i in 1:8 if N>>(i-1)&0x01==0x01]
+
 rulesums(::Rule{N}) where N = rulesums(N)
+
 rulesums(::LifeRule{B, S}) where {B, S} = rulesums(B), rulesums(S)

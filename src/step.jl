@@ -20,7 +20,7 @@ end
 
 
 """
-    step!(lg::LifeGrid; dense=false, chunklength=128, parallel=size(lg, 1)>1024)
+    step!(lg::LifeGrid; chunklength=$DEFAULT_CHUNK_SIZE, parallel=size(lg, 1)>1024)
 
 Update `lg` one generation according to the rules of Conway's Game of Life and return it.
 
@@ -28,54 +28,32 @@ A Dirichlet boundary condition is applied, fixing all cells outside of the grid 
 
 `step!` runs using all available threads by default.
 
-If `dense` is `false`, each `$(CELLS_PER_CLUSTER)×chunklength` section of the grid is
-checked for live cells so that an update of that section can be skipped if there are none.
-The performance impact of this check is small but measurable, so if your grid doesn't
-contain large areas devoid of living cells you should set `dense=true`.
-
 `chunklength` determines the size of a chunk of data that `step!` works on before proceeding
-to the next chunk. 128 is chosen as the default since it strikes a good balance: it leads to
-chunks large enough (5 KiB) that work isn't interrupted too often, and small enough to fit
-in the L1 cache of most machines. The height of `lg` must be at least
+to the next chunk. $DEFAULT_CHUNK_SIZE is chosen as the default since it strikes a good
+balance: it leads to chunks large enough that work isn't interrupted too often, and small
+enough to fit in the L1 cache of most machines. The height of `lg` must be at least
 `chunksize*Threads.nthreads()` for all threads to be fully engaged.
 
 `parallel` determines whether `step!` will run with multiple threads. It is `true` by
 default if `lg`'s height exceeds 1024, and `false` otherwise. This is a reasonable default
 on most machines, but it's worth experimenting with.
-
-# Extended Help
-
-TODO: talk about how to specialize updatedcluster
 """
-function step!(lg::LifeGrid; dense=false, chunklength=128, parallel=size(lg, 1)>1024)
-    runstep!() = if dense
-        stepraw!(lg, chunklength, :dense)
-    else
-        stepraw!(lg, chunklength, Sparse)
-    end
-
+function step!(lg::LifeGrid; chunklength=DEFAULT_CHUNK_SIZE, parallel=size(lg, 1)>1024)
     if parallel
-        return runstep!()
+        return stepraw!(lg, chunklength)
     else
         disable_polyester_threads() do
-            return runstep!()
+            return stepraw!(lg, chunklength)
         end
     end
 end
 
 
 
-# Type to use to tell stepraw! whether to check for dead zones while iterating
-struct Sparse end
-
-
-
 """
-    stepraw!(lg::LifeGrid, chunklength, ::Density) where Density
+    stepraw!(lg::LifeGrid, chunklength)
 
 The back end of [`step!`](@ref); updates and returns `lg`.
-
-If `Density` is a `LifeGame.Sparse`, the sparse algorithm is used.
 
 # Extended help
 
@@ -117,14 +95,14 @@ Columns at the boundaries are special cases, but the order of operations is the 
 computations are aided by having padding columns to the left and right of the first and last
 active grids.
 """
-function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
+function stepraw!(lg::LifeGrid{R}, chunklength) where R
     # Column iteration range
     Ibegin, Iend = firstindex(lg.grid, 1)+1, lastindex( lg.grid, 1)-1
-    innerrange(I) = I:min(I+chunklength-1, Iend)
+    chunklast(I) = min(I+chunklength-1, Iend)
 
     # Convenience names; also helps @batch avoid allocations
-    lbuf   = lg.leftcolbuffer
-    mbuf   = lg.middlecolbuffer
+    lbuf   = lg.colbuffer1
+    mbuf   = lg.colbuffer2
 
     # First iteration: update the halos of the second column
     firstcol  = @view lg.grid[:,begin]
@@ -132,13 +110,13 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
     thirdcol  = @view lg.grid[:,begin+2]
     @batch for I in Ibegin:chunklength:Iend
         # Update the halos of the first row in preparation for inner iterations
-        for i in innerrange(I)
+        for i in I:chunklast(I)
             lbuf[i] = updatedhalos(firstcol[i], secondcol[i], thirdcol[i])
         end
     end
 
     # Interior iterations
-    @inbounds for j in firstindex(lg.grid, 2)+2:lastindex( lg.grid, 2)-1
+    @inbounds for j in firstindex(lg.grid, 2)+2:lastindex(lg.grid, 2)-1
         # Views of the current and neighboring columns
         left   = @view lg.grid[:,j-1]
         middle = @view lg.grid[:,j]
@@ -147,12 +125,12 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
         # Outer loop over chunks of rows
         @batch for I in Ibegin:chunklength:Iend
             # Update cells
-            for i in innerrange(I)
+            for i in I:chunklast(I)
                 left[i] = updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R)
             end
 
             # Update halos
-            for i in innerrange(I)
+            for i in I:chunklast(I)
                 mbuf[i] = updatedhalos(lbuf[i], middle[i], right[i])
             end
         end
@@ -166,7 +144,7 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
     shift = CELLS_PER_CLUSTER - size(lg, 2)%CELLS_PER_CLUSTER + 1 # add 1 for halo
     @batch for I in Ibegin:chunklength:Iend
         # Update active cells and zero trailing cells
-        for i in innerrange(I)
+        for i in I:chunklast(I)
             updated = (updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R) >> shift) << shift
             lastcol[i] = updated
         end
