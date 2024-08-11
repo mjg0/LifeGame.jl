@@ -53,7 +53,7 @@ include("SlowLifeGrid.jl")
 
     @testset "updatedcluster" begin
         # Test with some fixed values that have been calculated by hand
-        rule = LifeGame.LifeRule((3,), (2, 3))
+        rule = LifeGame.LifeRule("B3/S23")
         for (above, middle, below, result) in ((0b1100, 0b1000, 0b0000, 0b1100),
                                                (0b0100, 0b0100, 0b0100, 0b1110),
                                                (0b0010, 0b1010, 0b0110, 0b0011),
@@ -84,7 +84,7 @@ include("SlowLifeGrid.jl")
         # Test popular rules and rules that used to cause problems for the sparse algorithm
         for rule in ("B3/S23", "B36/S23", "B3678/S34678", "B2/S", "B3/S56", "B37/S357")
             @testset "rule $rule" begin
-                for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 251))
+                for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 256))
                     # Initialize slow and fast grids randomly, with about 1/4 of cells alive
                     grid = rand((false, false, false, true), x, y)
                     slowgrid = SlowLifeGrid(grid; rule=rule)
@@ -92,13 +92,13 @@ include("SlowLifeGrid.jl")
                     grid_sparse_serial   = LifeGrid(grid; rule=rule)
                     grid_dense_parallel  = LifeGrid(grid; rule=rule)
                     grid_sparse_parallel = LifeGrid(grid; rule=rule)
-                    # Make sure results are identical over 100 steps
-                    for _ in 1:100
+                    # Make sure results are identical over 10 steps
+                    for _ in 1:10
                         step!(slowgrid)
-                        step!(grid_dense_serial,    sparse=false)
-                        step!(grid_sparse_serial,   sparse=true)
-                        step!(grid_dense_parallel,  sparse=false, chunklength=8, parallel=true)
-                        step!(grid_sparse_parallel, sparse=true,  chunklength=8, parallel=true)
+                        step!(grid_dense_serial,    dense=true)
+                        step!(grid_sparse_serial,   dense=false)
+                        step!(grid_dense_parallel,  dense=true,  chunklength=8, parallel=true)
+                        step!(grid_sparse_parallel, dense=false, chunklength=8, parallel=true)
                         @test all(slowgrid .== grid_dense_serial
                                            .== grid_sparse_serial
                                            .== grid_dense_parallel

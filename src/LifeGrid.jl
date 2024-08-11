@@ -51,7 +51,7 @@ A struct holding birth and survival [`Rule`](@ref)s.
 
 Return a `LifeRule` with birth rule `Rule(b...)` and survival rule `Rule(s...)`.
 """
-struct LifeRule{Birth,Survival}
+struct LifeRule{Birth, Survival}
     function LifeRule(rule::AbstractString)
         rulematch = match(r"^B(\d*)/S(\d*)$", rule)
         if rulematch === nothing
@@ -112,12 +112,10 @@ mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
     grid::Matrix{CLUSTER_TYPE}
     leftcolbuffer::Vector{CLUSTER_TYPE}   # used in step!
     middlecolbuffer::Vector{CLUSTER_TYPE} # used in step!
-    middledeadzonebuffer::Vector{Bool}    # used in step! when sparse=true
-    rightdeadzonebuffer::Vector{Bool}     # used in step! when sparse=true
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
-        # Create grid and buffers based on the supplied size
+        # Create grid based on the supplied size
         paddedheight = m+2
         paddedpackedwidth = cld(n, CELLS_PER_CLUSTER)+2
         grid = zeros(CLUSTER_TYPE, paddedheight, paddedpackedwidth)
@@ -125,11 +123,9 @@ mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
         # Buffers
         lcbuf = zeros(CLUSTER_TYPE, paddedheight)
         mcbuf = deepcopy(lcbuf)
-        mdzbuf = zeros(Bool, paddedheight)
-        rdzbuf = deepcopy(mdzbuf)
 
         # Return the LifeGrid
-        return new{LifeRule(rule)}(n, grid, lcbuf, mcbuf, mdzbuf, rdzbuf)
+        return new{LifeRule(rule)}(n, grid, lcbuf, mcbuf)
     end
 
     function LifeGrid(grid::BitArray; kw...)

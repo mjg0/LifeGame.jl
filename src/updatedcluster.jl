@@ -93,7 +93,6 @@ Updates are done according to the specified [`LifeRule`](@ref), which contains b
 and survival (`S`) conditions.
 """
 function updatedcluster(above, current, below, ::LifeRule{B, S}) where {B, S}
-    # Get bit sums
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
     # Update current according to the survival and birth rules

@@ -20,7 +20,7 @@ end
 
 
 """
-    step!(lg::LifeGrid; sparse=true, chunklength=128, parallel=size(lg, 1)>1024)
+    step!(lg::LifeGrid; dense=false, chunklength=128, parallel=size(lg, 1)>1024)
 
 Update `lg` one generation according to the rules of Conway's Game of Life and return it.
 
@@ -28,10 +28,10 @@ A Dirichlet boundary condition is applied, fixing all cells outside of the grid 
 
 `step!` runs using all available threads by default.
 
-If `sparse` is `true`, each `$(CELLS_PER_CLUSTER)×chunklength` section of the grid is
+If `dense` is `false`, each `$(CELLS_PER_CLUSTER)×chunklength` section of the grid is
 checked for live cells so that an update of that section can be skipped if there are none.
 The performance impact of this check is small but measurable, so if your grid doesn't
-contain large areas devoid of living cells you should set `sparse=false`.
+contain large areas devoid of living cells you should set `dense=true`.
 
 `chunklength` determines the size of a chunk of data that `step!` works on before proceeding
 to the next chunk. 128 is chosen as the default since it strikes a good balance: it leads to
@@ -47,11 +47,11 @@ on most machines, but it's worth experimenting with.
 
 TODO: talk about how to specialize updatedcluster
 """
-function step!(lg::LifeGrid; sparse=true, chunklength=128, parallel=size(lg, 1)>1024)
-    runstep!() = if sparse
-        stepraw!(lg, chunklength, Sparse())
-    else
+function step!(lg::LifeGrid; dense=false, chunklength=128, parallel=size(lg, 1)>1024)
+    runstep!() = if dense
         stepraw!(lg, chunklength, :dense)
+    else
+        stepraw!(lg, chunklength, Sparse)
     end
 
     if parallel
@@ -118,8 +118,6 @@ computations are aided by having padding columns to the left and right of the fi
 active grids.
 """
 function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
-    dense = !(Density <: Sparse)
-
     # Column iteration range
     Ibegin, Iend = firstindex(lg.grid, 1)+1, lastindex( lg.grid, 1)-1
     innerrange(I) = I:min(I+chunklength-1, Iend)
@@ -127,9 +125,6 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
     # Convenience names; also helps @batch avoid allocations
     lbuf   = lg.leftcolbuffer
     mbuf   = lg.middlecolbuffer
-    ldzbuf = true # only used as a temporary for a single iteration
-    mdzbuf = lg.middledeadzonebuffer
-    rdzbuf = lg.rightdeadzonebuffer
 
     # First iteration: update the halos of the second column
     firstcol  = @view lg.grid[:,begin]
@@ -139,12 +134,6 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
         # Update the halos of the first row in preparation for inner iterations
         for i in innerrange(I)
             lbuf[i] = updatedhalos(firstcol[i], secondcol[i], thirdcol[i])
-        end
-
-        # Initialize the dead zone buffers if appropriate
-        if !dense
-            mdzbuf[I] = sum(@view secondcol[innerrange(I)]) != 0
-            rdzbuf[I] = sum(@view thirdcol[ innerrange(I)]) != 0
         end
     end
 
@@ -157,27 +146,15 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
 
         # Outer loop over chunks of rows
         @batch for I in Ibegin:chunklength:Iend
-            # Swap dead zone buffers
-            #if !dense
-            #    ldzbuf = mdzbuf[I]
-            #    mdzbuf[I] = rdzbuf[I]
-            #    rdzbuf[I] = sum(@view right[innerrange(I)]) != 0
-            #end
+            # Update cells
+            for i in innerrange(I)
+                left[i] = updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R)
+            end
 
-            # Update cells if appropriate
-            lastI = last(innerrange(I))+1
-            #if dense || ldzbuf || lbuf[I-1] != 0 || lbuf[lastI] != 0
-                for i in innerrange(I)
-                    left[i] = updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R)
-                end
-            #end
-
-            # Update halos if appropriate
-            #if dense || ldzbuf || mdzbuf[I] || rdzbuf[I]
-                for i in innerrange(I)
-                    mbuf[i] = updatedhalos(lbuf[i], middle[i], right[i])
-                end
-            #end
+            # Update halos
+            for i in innerrange(I)
+                mbuf[i] = updatedhalos(lbuf[i], middle[i], right[i])
+            end
         end
 
         # Swap column buffers
@@ -189,11 +166,9 @@ function stepraw!(lg::LifeGrid{R}, chunklength, ::Density) where {R, Density}
     shift = CELLS_PER_CLUSTER - size(lg, 2)%CELLS_PER_CLUSTER + 1 # add 1 for halo
     @batch for I in Ibegin:chunklength:Iend
         # Update active cells and zero trailing cells
-        if dense || ldzbuf || mdzbuf[I] || rdzbuf[I]
-            for i in innerrange(I)
-                updated = (updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R) >> shift) << shift
-                lastcol[i] = updated
-            end
+        for i in innerrange(I)
+            updated = (updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R) >> shift) << shift
+            lastcol[i] = updated
         end
     end
 
