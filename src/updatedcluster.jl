@@ -157,30 +157,46 @@ end
 
 
 
-# updatedcluster specialization for B3/S23 (Conway's life)
-function updatedcluster(above, current, below, ::LifeRule{Rule(3), Rule(2, 3)})
-    bit1, bit2, bit3, bit4 = bitsums(above, current, below)
+"""
+    @specialize_updatedcluster birth survival body
 
-    current |=  bit1 # birth 1, 3, 5, and 7
-    current &=  bit2 # kill 1, 4, 5, and 8
-    current &= ~bit3 # kill 6 and 7
+Create a specialization of [`updatedcluster`](@ref) for the given rule.
 
-    return current
+`birth` and `survival` are lists of neighbor sums causing birth and survival, respectively.
+
+`body` is a statement that can use `above`, `below`, `current` (the arguments to
+`updatedcluster`), `bit1`, `bit2`, `bit3`, and `bit4` (the results of
+`bitsums(above, below, current)`) to compute the updated state of `current`.
+
+As an example, the `updatedcluster` specialization for `B2/S` is created with:
+
+```julia
+@specialize_updatedcluster [2] [] ~bit1 & bit2 & ~bit3
+```
+"""
+macro specialize_updatedcluster(birth, survival, body)
+    liferule = :(::LifeRule{Rule($(birth)...), Rule($(survival)...)})
+    qualified_name = esc(GlobalRef(LifeGame, :updatedcluster))
+
+    return quote
+        function $qualified_name(above, current, below, $liferule)
+            bit1, bit2, bit3, bit4 = bitsums(above, current, below)
+            $body
+        end
+    end
 end
 
-# updatedcluster specialization for B36/S23 (highlife)
-function updatedcluster(above, current, below, ::LifeRule{Rule(3, 6), Rule(2, 3)})
-    bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
-    current &=  bit2 # kill 1, 4, 5, and 8
-    current &= ~bit3 # kill 6 and 7
-    current |=  bit2 & (bit1 ⊻ bit3) # birth 3 or 6, but not 7
 
-    return current
-end
+# Specializations
+# B3/S23 (Conway's life)
+@specialize_updatedcluster [3]       [2, 3] (current | bit1) & bit2 & ~bit3
 
-# updatedcluster specialization for B2/S (seeds)
-#function updatedcluster(above, current, below, ::LifeRule{Rule(2), Rule()})
-#    bit1, bit2, bit3, bit4 = bitsums(above, current, below)
-#    return ~bit1 & bit2 & ~bit3 & ~bit4
-#end
+# B36/S23 (highlife)
+@specialize_updatedcluster [3, 6]    [2, 3] current & bit2 & ~bit3 | bit2 & (bit1 ⊻ bit3)
+
+# B2/S (seeds)
+@specialize_updatedcluster [2]       []     ~bit1 & bit2 & ~bit3
+
+# B234/S (Persian rug)
+@specialize_updatedcluster [2, 3, 4] []     bit2 & ~bit3 | ~bit1 & ~bit2 & bit3
