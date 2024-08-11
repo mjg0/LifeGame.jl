@@ -83,7 +83,7 @@ include("SlowLifeGrid.jl")
     @testset "step!" begin
         # Test popular rules
         for rule in ("B3/S23",       # Conway's
-                     "B36/S23",      # high life
+                     "B36/S23",      # highlife
                      "B3678/S34678", # day and night
                      "B35678/S5678", # diamoeba
                      "B2/S",         # seeds

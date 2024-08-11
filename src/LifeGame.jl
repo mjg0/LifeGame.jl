@@ -1,22 +1,21 @@
 """
     LifeGame
 
-A module with infrastructure to simulate Conway's Game of Life.
+A module for simulating Conway's Game of Life and similar cellular automata.
 
-This threaded life game implementation, which was inspired by [exrok's Rust
-implementation](https://github.com/exrok/game_of_life/), uses finite grids with all cells
-beyond the edges of the grid fixed at zero. It's optimized for large, dense grids.
+This implementation uses finite grids with all cells beyond the edges of the grid fixed at
+zero. It's optimized for large, dense grids and has impressive performance.
 
 The public interface to `LifeGame` includes the types [`LifeGame`](@ref) and
-[`LifePattern`](@ref), the module [`LifePatterns`](@ref), and the functions [`step!`](@ref)
-and [`insert!`](@ref).
+[`LifePattern`](@ref), the module [`LifePatterns`](@ref), and the functions [`step!`](@ref),
+[`insert!`](@ref), and [`rule`](@ref).
 
 # Examples
 
 ```jldoctest
 julia> using LifeGame
 
-julia> lg = LifeGrid(4, 5);
+julia> lg = LifeGrid(4, 5, rule="B36/S23"); # simulate highlife
 
 julia> insert!(lg, 1, 1, LifePatterns.glider)
 4×5 LifeGrid:
@@ -51,17 +50,18 @@ array, also for numerical convenience. The storage backing a 200×300 `LifeGrid`
 
 Rather than updating each bit individually, `step!` uses bitwise operations (half and full 
 adders, bitshifts, **AND**s and **OR**s) on entire clusters. The function used to update a
-single cluster--62 cells--compiles to 37 instructions on an x86_64 test machine. See the
-extended help for [`LifeGame.updatedcluster`](@ref) for details on how the cluster update
-works.
+single cluster--62 cells--compiles to 40 instructions for Conway's Game of Life on an x86_64
+test machine. See the extended help for [`LifeGame.updatedcluster`](@ref) for details on how
+the cluster update works and how to specialize a rule to improve performance.
 
 ## Performance
 
 `step!` is written to compile to highly vectorized instructions, uses CPU caches
 efficiently, and is parallelized. On a laptop with an AMD 7640U, it typically takes about
-300 μs to `step!` a 10,000×10,000 `LifeGrid`, and 50 ms to `step!` a 100,000×100,000
-`LifeGrid`. Since keeping the CPU fed is a major bottleneck when update operations are so
-fast, `step!` operates faster per cell when the grid it's working on fits in the CPU cache.
+300 μs to `step!` a 10,000×10,000 `LifeGrid` and 50 ms to `step!` a 100,000×100,000
+`LifeGrid` using the Conway's Game of Life rule. Since keeping the CPU fed is a major
+bottleneck when update operations are so fast, `step!` operates faster per cell when the
+grid it's working on fits in the CPU cache.
 """
 module LifeGame
 

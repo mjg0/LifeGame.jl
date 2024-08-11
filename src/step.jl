@@ -22,9 +22,9 @@ end
 """
     step!(lg::LifeGrid; chunklength=$DEFAULT_CHUNK_SIZE, parallel=size(lg, 1)>1024)
 
-Update `lg` one generation according to the rules of Conway's Game of Life and return it.
+Update `lg` one generation according to the [`rule`](@ref) associated with it.
 
-A Dirichlet boundary condition is applied, fixing all cells outside of the grid at zero.
+All cells outside of the grid boundary are fixed at zero.
 
 `step!` runs using all available threads by default.
 
@@ -37,6 +37,12 @@ enough to fit in the L1 cache of most machines. The height of `lg` must be at le
 `parallel` determines whether `step!` will run with multiple threads. It is `true` by
 default if `lg`'s height exceeds 1024, and `false` otherwise. This is a reasonable default
 on most machines, but it's worth experimenting with.
+
+A generic algorithm for updating each cluster in the grid is used by default. The compiler
+does a decent job of optimizing for most rules, but hand-tuning the cluster update function
+can improve performance by 10% for some rules. See the extended help for
+[`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
+Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
 """
 function step!(lg::LifeGrid; chunklength=DEFAULT_CHUNK_SIZE, parallel=size(lg, 1)>1024)
     if parallel

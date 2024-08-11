@@ -1,8 +1,6 @@
 # LifeGame.jl
 
-`LifeGame.jl` is a simple, fast, threaded [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) simulator inspired by [exrok's Rust implementation](https://github.com/exrok/game_of_life). It is optimized for large, dense, high-entropy grids.
-
-Only fixed boundary conditions--considering all cells outside of the finite grid to be dead--are available [for now](#future-work).
+`LifeGame.jl` is a simple, fast, threaded simulator for cellular automata like [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life). It is optimized for large, dense, high-entropy grids. Only fixed boundary conditions--considering all cells outside of the finite grid to be dead--are available [for now](#future-work).
 
 [Here](https://youtu.be/DehyzMiwDwY) is a [presentation](https://docs.google.com/presentation/d/1D52NkO1bAx7DJG9WCElswsvsZ4wDRSYU_7lufQqEku8/edit?usp=sharing) that I gave for a friend's students which explains some of the optimzation choices made when creating `LifeGame.jl`.
 
@@ -42,8 +40,8 @@ end
 You only really need to know 2 methods to use `LifeGame.jl`:
 
 - The constructor:
-  - `LifeGame(m, n)`: create an `m×n` grid devoid of life.
-  - `LifeGame(grid)`: create a grid from `grid`, where non-zero or true cells are alive.
+  - `LifeGame(m, n; rule="B3/S23")`: create an `m×n` grid devoid of life.
+  - `LifeGame(grid::AbstractMatrix; rule="B3/S23)`: create a grid from `grid`, where non-zero or true cells are alive.
 - `step!(lifegrid)`: update `lifegrid` once.
 
 `LifeGrid`s are `AbstractArray`s, so you can index one as you would expect:
@@ -57,6 +55,14 @@ mygrid[1, 2] # true
 mygrid[1, 3] = false # OK
 mygrid[1, 4] = 1 # also OK
 ```
+
+Rules for the simulation's evolution are formatted as `Bm.../Sn...`, where `m...` and `n...` are non-delimited lists of neighbor sums for which cells are born or survive, respectively. A cells' neighbors are the 8 cells adjacent up, down, left, right, diagonally in each direction, so the sum can be anywhere from 1 to 8. As an example, a grid for simulating [highlife](https://en.wikipedia.org/wiki/Highlife_%28cellular_automaton%29) (for which 2 or 3 living neighbors lead to cell survival and 3 or 6 living neighbors lead to cell birth) can be created thus:
+
+```julia
+highlifegrid = LifeGrid(200, 300; rule="B36/S23")
+```
+
+The default `rule` is Conway's Game of Life (`B3/S23`).
 
 If you plan on adding many of the same pattern into a `LifeGrid`, it is most efficient to create a `LifePattern` once then `insert!` it multiple times:
 
@@ -139,6 +145,6 @@ png("benchmark-results.png")
 
 - This style of implementation is amenable to GPU acceleration.
 
-- A sparse algorithm that actually works could be worthwhile
+- A sparse algorithm could be worthwhile
 
 **Issues and pull requests are welcome!**

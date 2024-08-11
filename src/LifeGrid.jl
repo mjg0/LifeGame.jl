@@ -8,7 +8,7 @@ export LifeGrid, rule
 A birth or survival rule, where `NeighborSums` stores the numbers for the rule.
 
 `NeighborSums` is an 8-bit unsigned integer, where the `n`th bit being on means that number
-leads to birth or survival. For example, high life, with the rule B36/S23, would have birth
+leads to birth or survival. For example, highlife, with the rule B36/S23, would have birth
 rule `Rule{0b00100100}` and survival rule `Rule{0b00000110}`.
 
 ---
@@ -41,7 +41,7 @@ end
 
 
 """
-    LifeRule{Birth,Survival}
+    LifeRule{Birth, Survival}
 
 A struct holding birth and survival [`Rule`](@ref)s.
 
@@ -85,7 +85,7 @@ where `m...` are the non-deliminted numbers leading to birth, and `n...` are the
 non-deliminted numbers leading to survival. The default is the rule for Conway's Game of
 Life, `B3/S23`. Query the rule for a given `LifeGrid` with the [`rule`](@ref) function.
 
-A `LifeGrid` can be updated with the [`step!`](@ref) function.
+A `LifeGrid` can be advanced one generation with the [`step!`](@ref) function.
 
 [`LifePattern`](@ref)s can be inserted into a `LifeGrid` via [`insert!`](@ref).
 

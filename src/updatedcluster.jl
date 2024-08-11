@@ -6,7 +6,7 @@ Return a 4-tuple containing the bitwise sum of the neighbor bits of the cluster 
 The first element of the returned tuple represents the ones place, the second the twos
 place, the third the fours place, and the fourth the eights place.
 
-# Extended Help
+# Extended help
 
 As an example, given these `above`, `current`, and `below`:
 
@@ -91,6 +91,58 @@ adders to calculate the sums and carries needed.
 
 Updates are done according to the specified [`LifeRule`](@ref), which contains birth (`B`)
 and survival (`S`) conditions.
+
+# Extended help
+
+It's possible to specialize `updatedcluster` for a specific rule. The compiler does a good
+job with the generic `updatedcluster` so usually the performance gain is marginal, but for
+some rules a modest boost (~10%) is attainable. The signature for the specialization should
+be:
+
+```julia
+LifeGame.updatedcluster(above, current, below,
+                        ::LifeGame.LifeRule{LifeGame.Rule(B...), LifeGame.Rule(S...)})
+```
+
+...where `B...` and `S...` are lists of neighbor sums that should result in birth and
+survival, respectively. For example, to specialize `updatedcluster` for `B123/S45`, the
+signature is:
+
+```julia
+LifeGame.updatedcluster(above, current, below,
+                        ::LifeGame.LifeRule{LifeGame.Rule(1, 2, 3), LifeGame.Rule(4, 5)})
+```
+
+`above`, `current`, and `below` are "clusters": 64-bit unsigned integers representing rows
+of 62 living cells, with a single cell of padding at each end to allow single bitshifts not
+to roll relevant cells off of the edges. `above` is the cluster above `current`, and `below`
+is the cluster below. `updatedcluster` returns a single 64-bit unsingned integer containing
+the 62 cells (the first and last bits are ignored) of `current` stepped forward one
+generation.
+
+`LifeGame.bitsums` will be helpful for most specializations. It takes `above`, `current`,
+and `below` and returns the bitwise sum as 4 64-bit unsigned integers: the first contains
+the ones place, the second the twos place, the third the fours place, and the fourth the
+eights place.
+
+As an example, the specialization for the rule `B3/S4` might look like:
+
+```julia
+function LifeGame.updatedcluster(above, current, below,
+                                 ::LifeGame.LifeRule{LifeGame.Rule(1), LifeGame.Rule(2)})
+    # Get the bitwise sum of the neighbor cells of each bit in `current`
+    1s_place, 2s_pace, 4s_place, 8s_place = LifeGame.bitsums(above, current, below)
+
+    # Kill all cells but those with a neighbor sum of 4
+    current &= ~1s_place & ~2s_place & 4s_place & ~8s_place
+
+    # Birth cells that had 3 neighbors
+    current |= 1s_place & 2s_place & ~4s_place & ~8s_place
+
+    # Return the updated cluster
+    return current
+end
+```
 """
 function updatedcluster(above, current, below, ::LifeRule{B, S}) where {B, S}
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
@@ -103,6 +155,8 @@ function updatedcluster(above, current, below, ::LifeRule{B, S}) where {B, S}
     return current
 end
 
+
+
 # updatedcluster specialization for B3/S23 (Conway's life)
 function updatedcluster(above, current, below, ::LifeRule{Rule(3), Rule(2, 3)})
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
@@ -114,7 +168,7 @@ function updatedcluster(above, current, below, ::LifeRule{Rule(3), Rule(2, 3)})
     return current
 end
 
-# updatedcluster specialization for B36/S23 (high life)
+# updatedcluster specialization for B36/S23 (highlife)
 function updatedcluster(above, current, below, ::LifeRule{Rule(3, 6), Rule(2, 3)})
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
@@ -126,7 +180,7 @@ function updatedcluster(above, current, below, ::LifeRule{Rule(3, 6), Rule(2, 3)
 end
 
 # updatedcluster specialization for B2/S (seeds)
-function updatedcluster(above, current, below, ::LifeRule{Rule(2), Rule()})
-    bit1, bit2, bit3, bit4 = bitsums(above, current, below)
-    return ~bit1 & bit2 & ~bit3 & ~bit4
-end
+#function updatedcluster(above, current, below, ::LifeRule{Rule(2), Rule()})
+#    bit1, bit2, bit3, bit4 = bitsums(above, current, below)
+#    return ~bit1 & bit2 & ~bit3 & ~bit4
+#end
