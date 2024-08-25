@@ -28,7 +28,7 @@ struct Rule{NeighborSums}
     function Rule(n...)
         onbits = zero(UInt8)
         for i in n
-            if i in n
+            if i in 1:8
                 onbits |= 0x01<<(i-1)
             else
                 throw(ArgumentError("Invalid rule neighbor sum $i; sums must be in [1, 8]"))
