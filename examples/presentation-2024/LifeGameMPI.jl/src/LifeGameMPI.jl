@@ -46,8 +46,8 @@ struct LifeGridMPI <: AbstractMatrix{Bool}
 
         leftsendbuf  = MPI.Buffer(@view lg.grid[:,begin+1])
         leftrecvbuf  = MPI.Buffer(@view lg.grid[:,begin])
-        rightsendbuf = MPI.Buffer(@view lg.grid[:,begin+1])
-        rightrecvbuf = MPI.Buffer(@view lg.grid[:,begin])
+        rightsendbuf = MPI.Buffer(@view lg.grid[:,end-1])
+        rightrecvbuf = MPI.Buffer(@view lg.grid[:,end])
 
         halorequests = MPI.MultiRequest(4)
 
