@@ -108,10 +108,13 @@ Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 True and non-zero values indicate living cells; false and zero values indicate dead cells.
 """
 mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
+    # TODO: parameterize, LifeGrid{T,H,LifeRule}
     width::Int64
     grid::Matrix{CLUSTER_TYPE}
-    colbuffer1::Vector{CLUSTER_TYPE} # used in step!
-    colbuffer2::Vector{CLUSTER_TYPE} # used in step!
+    inhalosleft::Matrix{UInt8}
+    inhalosright::Matrix{UInt8}
+    outhalosabove::Matrix{UInt8}
+    outhalosbelow::Matrix{UInt8}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
@@ -121,10 +124,11 @@ mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
         grid = zeros(CLUSTER_TYPE, paddedheight, paddedpackedwidth)
 
         # Buffers
-        buffer = zeros(CLUSTER_TYPE, paddedheight)
+        bufferheight = cld(m, sizeof(UInt8))
+        halos = ntuple(_->zeros(UInt16, bufferheight, paddedpackedwidth), 4)
 
         # Return the LifeGrid
-        return new{LifeRule(rule)}(n, grid, buffer, deepcopy(buffer))
+        return new{LifeRule(rule)}(n, grid, halos...)
     end
 
     function LifeGrid(grid::BitArray; kw...)

@@ -17,6 +17,30 @@ function updatedhalos(left, current, right)
     return (current & ~(LAST_BIT | FIRST_BIT)) | lefthalo | righthalo
 end
 
+@inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
+    N = 8*sizeof(H)
+    centermask = (typemax(T) << 2) >> 1
+    lbit = T(lefthalo  >> (N-K) & one(H)) << (8*sizeof(T)-1)
+    rbit = T(righthalo >> (N-K) & one(H))
+    return (cluster & centermask) | lbit | rbit
+end
+
+#@inline function updatebdchunkhalos(block::NTuple{N,T}, ::Type{H}) where {N,T<:Unsigned,H<:Unsigned}
+@inline function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, N, ::Type{H}) where {T,H}
+    lhalo = zero(H)
+    rhalo = zero(H)
+
+    lshift = 8*sizeof(T)-2
+    rshift = 1
+
+    @inbounds for k in 1:N
+        lhalo |= H((grid[i+k-1,j] >> lshift) & one(T)) << (N-k)
+        rhalo |= H((grid[i+k-1,j] >> rshift) & one(T)) << (N-k)
+    end
+
+    return lhalo, rhalo
+end
+
 
 
 """
@@ -56,106 +80,164 @@ end
 
 
 
-"""
-    stepraw!(lg::LifeGrid, chunklength)
+#"""
+#    stepraw!(lg::LifeGrid, chunklength)
+#
+#The back end of [`step!`](@ref); updates and returns `lg`.
+#
+## Extended help
+#
+#`lg` is updated one column of clusters at a time--that is, a column of 64-bit unsigned
+#integers, each representing a 62-cell portion of a row (see [`updatedcluster`](@ref)).
+#
+#There are 3 arrays involved in the update:
+#
+#1. The grid itself, a `Matrix` of `UInt64` clusters.
+#2. The left buffer, a `Vector` of `UInt64`s with as many elements as the grid has rows.
+#3. The middle buffer, identical in type and size to the left buffer.
+#
+#These are carefully updated in an order that eliminates inter-iteration dependencies when
+#updating a column. This allows the compiler to emit vectorized instructions and makes it
+#safe to operate on a single column with multiple threads. The use of only two buffer rows,
+#rather than an entire intermediate grid, keeps the memory footprint small and makes better
+#use of the cache.
+#
+#Here is how one cluster on the interior of the grid is updated, following the actual order of
+#operations used in this function:
+#
+#1. The cluster is updated to according to the life rules using the corresponding cells
+#   above, at the same place as, and below the cluster in the left buffer using
+#   `updatedcluster`:\n
+#   `grid[i,j] = updatedcluster(leftbuffer[i-1], leftbuffer[i], leftbuffer[i+1])`.
+#1. The corresponding cluster in the middle buffer has its halos updated; the corresponding
+#   cluster in the left buffer is used as the left value, the cluster to the right of the
+#   grid cluster in question as the middle value, and the cluster two to the right of the
+#   grid cluster in question as the right value:\n
+#   `rightbuffer[i] = updatedhalos(leftbuffer[i], grid[i,j+1], grid[i,j+2])`.
+#1. The buffers are switched in preparation for the next iteration.
+#
+#Notice that no cell that is written to on this iteration is also read from; this allows for
+#vectorization and multithreading. Cache efficiency is increased by doing these updates in
+#chunks: taking a portion of a column, updating it fully, and only then moving on to the next
+#chunk.
+#
+#Columns at the boundaries are special cases, but the order of operations is the same. The
+#computations are aided by having padding columns to the left and right of the first and last
+#active grids.
+#"""
+const _UInt = Unsigned
 
-The back end of [`step!`](@ref); updates and returns `lg`.
+@inline @inbounds function halotuple(grid, lhalo, rhalo, i, j, ::Val{N}) where N
+    return ntuple(k->updatedhalos(grid[i+k-1,j], lhalo, rhalo, Val(k)), Val(N))
+end
 
-# Extended help
+@generated function updategridchunk!(grid, i, j, above0, cur::NTuple{B,T}, belowB, rule) where {T,B}
+    updates = Expr(:block, (
+        :(grid[i,j] = updatedcluster(above0, cur[1], cur[2], rule)),
+        (
+            :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule)
+            for k in 2:B-1)
+        )...,
+        :(grid[i+$(B-1),j] = updatedcluster(cur[$(B-1)], cur[$B], belowB, rule))
+    )...)
 
-`lg` is updated one column of clusters at a time--that is, a column of 64-bit unsigned
-integers, each representing a 62-cell portion of a row (see [`updatedcluster`](@ref)).
+    return quote
+        @inbounds begin
+            $updates
+        end
+        return nothing
+    end
+end
 
-There are 3 arrays involved in the update:
+@generated function updategridendchunk!(grid, i, j, above0, cur::NTuple{M,T}, belowM, rule) where {T,M}
+    stores = Expr(:block)
 
-1. The grid itself, a `Matrix` of `UInt64` clusters.
-2. The left buffer, a `Vector` of `UInt64`s with as many elements as the grid has rows.
-3. The middle buffer, identical in type and size to the left buffer.
+    stores = if M == 1
+        Expr(:block, :(grid[i,j] = updatedcluster(above0, cur[i], belowM, rule)))
+    else
+        Expr(:block, (
+            :(grid[i, j] = updatedcluster(above0, cur[1], cur[2], rule)),
+            (
+                :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule))
+                for k in 2:M-1
+            )...,
+            :(grid[i+$(M-1),j] = updatedcluster(cur[$(M-1)], cur[$M], belowM, rule))
+        )...)
+    end
 
-These are carefully updated in an order that eliminates inter-iteration dependencies when
-updating a column. This allows the compiler to emit vectorized instructions and makes it
-safe to operate on a single column with multiple threads. The use of only two buffer rows,
-rather than an entire intermediate grid, keeps the memory footprint small and makes better
-use of the cache.
+    return quote
+        @inbounds begin
+            $stores
+        end
+        return nothing
+    end
+end
 
-Here is how one cluster on the interior of the grid is updated, following the actual order of
-operations used in this function:
+function stepraw!(lg::LifeGrid{R}, dummy) where {R}
+    grid = lg.grid
+    inL  = lg.inhalosleft
+    inR  = lg.inhalosright
 
-1. The cluster is updated to according to the life rules using the corresponding cells
-   above, at the same place as, and below the cluster in the left buffer using
-   `updatedcluster`:\n
-   `grid[i,j] = updatedcluster(leftbuffer[i-1], leftbuffer[i], leftbuffer[i+1])`.
-1. The corresponding cluster in the middle buffer has its halos updated; the corresponding
-   cluster in the left buffer is used as the left value, the cluster to the right of the
-   grid cluster in question as the middle value, and the cluster two to the right of the
-   grid cluster in question as the right value:\n
-   `rightbuffer[i] = updatedhalos(leftbuffer[i], grid[i,j+1], grid[i,j+2])`.
-1. The buffers are switched in preparation for the next iteration.
+    H = eltype(inL)
+    T = eltype(grid)
+    B = 8sizeof(H)
 
-Notice that no cell that is written to on this iteration is also read from; this allows for
-vectorization and multithreading. Cache efficiency is increased by doing these updates in
-chunks: taking a portion of a column, updating it fully, and only then moving on to the next
-chunk.
+    ilo = firstindex(grid, 1)+1
+    ihi = lastindex(grid, 1)-1
+    jlo = firstindex(grid, 2)+1
+    jhi = lastindex(grid, 2)-1
 
-Columns at the boundaries are special cases, but the order of operations is the same. The
-computations are aided by having padding columns to the left and right of the first and last
-active grids.
-"""
-function stepraw!(lg::LifeGrid{R}, chunklength) where R
-    # Column iteration range
-    Ibegin, Iend = firstindex(lg.grid, 1)+1, lastindex( lg.grid, 1)-1
-    chunklast(I) = min(I+chunklength-1, Iend)
+    ilo > ihi && return lg
 
-    # Convenience names; also helps @batch avoid allocations
-    lbuf   = lg.colbuffer1
-    mbuf   = lg.colbuffer2
+    hfirst = firstindex(inL, 1)
+    hlast  = lastindex(inL, 1)
 
-    # First iteration: update the halos of the second column
-    firstcol  = @view lg.grid[:,begin]
-    secondcol = @view lg.grid[:,begin+1]
-    thirdcol  = @view lg.grid[:,begin+2]
-    @batch for I in Ibegin:chunklength:Iend
-        # Update the halos of the first row in preparation for inner iterations
-        for i in I:chunklast(I)
-            lbuf[i] = updatedhalos(firstcol[i], secondcol[i], thirdcol[i])
+    @inbounds @batch for j in jlo:jhi
+        i = ilo
+        h = hfirst
+
+        above0 = zero(T)
+
+        # Process all chunks except the final chunk.
+        while i + B - 1 < ihi
+            cur  = halotuple(grid, inL[h],   inR[h],   i,   j, Val(B))
+            next = halotuple(grid, inL[h+1], inR[h+1], i+B, j, Val(B))
+
+            updategridchunk!(grid, i, j, above0, cur, next[1], R)
+            lg.outhalosleft[h], lg.outhalosright[h] = updatedchunkhalos(grid, i, j, B, H)
+
+            above0 = cur[end]
+            i += B
+            h += 1
+        end
+
+        # Final chunk: may be partial.
+        M = ihi - i + 1
+
+        if M == B
+            cur = halotuple(grid, inL[h], inR[h], i, j, Val(B))
+
+            # Bottom boundary row. Use real halo entry if present; otherwise zero halos.
+            belowB =
+                if h < hlast
+                    updatedhalos(grid[i+B, j], inL[h+1], inR[h+1], Val(1))
+                else
+                    updatedhalos(grid[i+B, j], zero(H), zero(H), Val(1))
+                end
+
+            updategridchunk!(grid, i, j, above0, cur, belowB, R)
+            lg.outhalosleft[h], lg.outhalosright[h] = updatedchunkhalos(grid, i, j, M, H)
+        else
+            cur = halotuple(grid, inL[h], inR[h], i, j, Val(M))
+
+            # Since this is a partial chunk, the row below is still within the same
+            # halo word position, at Val(M+1).
+            belowM = updatedhalos(grid[i+M, j], inL[h], inR[h], Val(M+1))
+
+            updategridendchunk!(grid, i, j, above0, cur, belowM, R)
+            lg.outhalosleft[h], lg.outhalosright[h] = updatedchunkhalos(grid, i, j, M, H)
         end
     end
 
-    # Interior iterations
-    @inbounds for j in firstindex(lg.grid, 2)+2:lastindex(lg.grid, 2)-1
-        # Views of the current and neighboring columns
-        left   = @view lg.grid[:,j-1]
-        middle = @view lg.grid[:,j]
-        right  = @view lg.grid[:,j+1]
-
-        # Outer loop over chunks of rows
-        @batch for I in Ibegin:chunklength:Iend
-            # Update cells
-            for i in I:chunklast(I)
-                left[i] = updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R)
-            end
-
-            # Update halos
-            for i in I:chunklast(I)
-                mbuf[i] = updatedhalos(lbuf[i], middle[i], right[i])
-            end
-        end
-
-        # Swap column buffers
-        lbuf, mbuf = mbuf, lbuf
-    end
-
-    # Last iteration: trailing cells are zeroed
-    lastcol = @view lg.grid[:,end-1]
-    shift = CELLS_PER_CLUSTER - size(lg, 2)%CELLS_PER_CLUSTER + 1 # add 1 for halo
-    @batch for I in Ibegin:chunklength:Iend
-        # Update active cells and zero trailing cells
-        for i in I:chunklast(I)
-            updated = (updatedcluster(lbuf[i-1], lbuf[i], lbuf[i+1], R) >> shift) << shift
-            lastcol[i] = updated
-        end
-    end
-
-    # Return the grid
     return lg
 end
