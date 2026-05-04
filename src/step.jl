@@ -17,28 +17,39 @@ function updatedhalos(left, current, right)
     return (current & ~(LAST_BIT | FIRST_BIT)) | lefthalo | righthalo
 end
 
-@inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
-    N = 8*sizeof(H)
-    centermask = (typemax(T) << 2) >> 1
-    lbit = T(lefthalo  >> (N-K) & one(H)) << (8*sizeof(T)-1)
-    rbit = T(righthalo >> (N-K) & one(H))
-    return (cluster & centermask) | lbit | rbit
+@inline @generated function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
+    Hbits = 8*sizeof(H)
+    Tbits = 8*sizeof(T)
+    return quote
+        centermask = (typemax(T) << 2) >> 1
+        lbit = T(lefthalo  >> $(Hbits-K) & one(H)) << $(Tbits-1)
+        rbit = T(righthalo >> $(Hbits-K) & one(H))
+        return (cluster & centermask) | lbit | rbit
+    end
 end
 
 #@inline function updatebdchunkhalos(block::NTuple{N,T}, ::Type{H}) where {N,T<:Unsigned,H<:Unsigned}
-@inline function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, N, ::Type{H}) where {T,H}
-    lhalo = zero(H)
-    rhalo = zero(H)
+Base.@propagate_inbounds @inline @generated function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, ::Type{H}) where {T,H}
+    N = 8*sizeof(H)
 
     lshift = 8*sizeof(T)-2
     rshift = 1
 
-    @inbounds for k in 1:N
-        lhalo |= H((grid[i+k-1,j] >> lshift) & one(T)) << (N-k)
-        rhalo |= H((grid[i+k-1,j] >> rshift) & one(T)) << (N-k)
-    end
+    updates = Expr(:block, Iterators.flatten((
+        (
+            :(lhalo |= H((grid[i+$(k-1), j] >> $lshift) & one(T)) << $(N-k)),
+            :(rhalo |= H((grid[i+$(k-1), j] >> $rshift) & one(T)) << $(N-k)),
+        ) for k in 1:N
+    ))...)
 
-    return lhalo, rhalo
+    return quote
+        lhalo = zero(H)
+        rhalo = zero(H)
+
+        $(updates)
+
+        return lhalo, rhalo
+    end
 end
 
 
@@ -127,18 +138,26 @@ end
 #"""
 const _UInt = Unsigned
 
-@inline @inbounds function halotuple(grid, lhalo, rhalo, i, j, ::Val{N}) where N
-    return ntuple(k->updatedhalos(grid[i+k-1,j], lhalo, rhalo, Val(k)), Val(N))
+@inline @generated function halotuple(grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
+    ret = Expr(:tuple, (
+        :(updatedhalos(grid[i+$k,j], lhalo, rhalo, Val($k)))
+        for k in 0:8*sizeof(H)-1
+    )...)
+    return quote
+        @inbounds begin
+            $ret
+        end
+    end
 end
 
-@generated function updategridchunk!(grid, i, j, above0, cur::NTuple{B,T}, belowB, rule) where {T,B}
+@generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above0, cur::NTuple{N,T}, belowB, rule)::NTuple{T,N} where {N,T}
     updates = Expr(:block, (
         :(grid[i,j] = updatedcluster(above0, cur[1], cur[2], rule)),
         (
-            :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule)
-            for k in 2:B-1)
+            :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule))
+            for k in 2:N-1
         )...,
-        :(grid[i+$(B-1),j] = updatedcluster(cur[$(B-1)], cur[$B], belowB, rule))
+        :(grid[i+$(N-1),j] = updatedcluster(cur[$(N-1)], cur[$N], belowB, rule))
     )...)
 
     return quote
@@ -150,6 +169,12 @@ end
 end
 
 @generated function updategridendchunk!(grid, i, j, above0, cur::NTuple{M,T}, belowM, rule) where {T,M}
+    if M == 1
+        return quote
+            @inbounds grid[i,j] = updatedcluster(above0, cur[1], belowM, rule)
+            return nothing
+        end
+    end
     stores = Expr(:block)
 
     stores = if M == 1
@@ -158,10 +183,10 @@ end
         Expr(:block, (
             :(grid[i, j] = updatedcluster(above0, cur[1], cur[2], rule)),
             (
-                :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule))
+                :(grid[i+$k-1,j] = updatedcluster(cur[$k-1], cur[$k], cur[$k+1], rule))
                 for k in 2:M-1
             )...,
-            :(grid[i+$(M-1),j] = updatedcluster(cur[$(M-1)], cur[$M], belowM, rule))
+            :(grid[i+$M-1,j] = updatedcluster(cur[$M-1], cur[$M], belowM, rule))
         )...)
     end
 
@@ -174,69 +199,42 @@ end
 end
 
 function stepraw!(lg::LifeGrid{R}, dummy) where {R}
+    H = eltype(lg.inhalosleft)
+    T = eltype(lg.grid)
+    Hbits = 8*sizeof(H)
+
     grid = lg.grid
-    inL  = lg.inhalosleft
-    inR  = lg.inhalosright
 
-    H = eltype(inL)
-    T = eltype(grid)
-    B = 8sizeof(H)
+    @inbounds for j in firstindex(lg.grid, 2)+1:lastindex(lg.grid, 2)-1
+        inhalosleft   = view(lg.inhalosright,  :, j-1)
+        inhalosright  = view(lg.inhalosleft,   :, j+1)
+        outhalosleft  = view(lg.outhalosleft,  :, j)
+        outhalosright = view(lg.outhalosright, :, j)
 
-    ilo = firstindex(grid, 1)+1
-    ihi = lastindex(grid, 1)-1
-    jlo = firstindex(grid, 2)+1
-    jhi = lastindex(grid, 2)-1
+        above = zero(T)
+        current = halotuple(grid, inhalosleft[begin], inhalosright[begin], 2, j)
 
-    ilo > ihi && return lg
+        # Update this row
+        @simd for I in firstindex(inhalosleft):lastindex(inhalosleft)-1
+            i = (I-1)*Hbits+2
 
-    hfirst = firstindex(inL, 1)
-    hlast  = lastindex(inL, 1)
+            next    = halotuple(grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
 
-    @inbounds @batch for j in jlo:jhi
-        i = ilo
-        h = hfirst
+            updategridchunk!(grid, i, j, above, current, next[1], R)
+            outhalosleft[I], outhalosright[I] = updatedchunkhalos(grid, i, j, H)
 
-        above0 = zero(T)
-
-        # Process all chunks except the final chunk.
-        while i + B - 1 < ihi
-            cur  = halotuple(grid, inL[h],   inR[h],   i,   j, Val(B))
-            next = halotuple(grid, inL[h+1], inR[h+1], i+B, j, Val(B))
-
-            updategridchunk!(grid, i, j, above0, cur, next[1], R)
-            lg.outhalosleft[h], lg.outhalosright[h] = updatedchunkhalos(grid, i, j, B, H)
-
-            above0 = cur[end]
-            i += B
-            h += 1
+            above = current[end]
+            current, next = next, current
         end
 
-        # Final chunk: may be partial.
-        M = ihi - i + 1
+        I = lastindex(inhalosleft)
+        i = (I-1)*Hbits+2
 
-        if M == B
-            cur = halotuple(grid, inL[h], inR[h], i, j, Val(B))
+        updategridchunk!(grid, i, j, above, current, zero(T), R)
+        outhalosleft[I], outhalosright[I] = updatedchunkhalos(grid, i, j, H)
 
-            # Bottom boundary row. Use real halo entry if present; otherwise zero halos.
-            belowB =
-                if h < hlast
-                    updatedhalos(grid[i+B, j], inL[h+1], inR[h+1], Val(1))
-                else
-                    updatedhalos(grid[i+B, j], zero(H), zero(H), Val(1))
-                end
-
-            updategridchunk!(grid, i, j, above0, cur, belowB, R)
-            lg.outhalosleft[h], lg.outhalosright[h] = updatedchunkhalos(grid, i, j, M, H)
-        else
-            cur = halotuple(grid, inL[h], inR[h], i, j, Val(M))
-
-            # Since this is a partial chunk, the row below is still within the same
-            # halo word position, at Val(M+1).
-            belowM = updatedhalos(grid[i+M, j], inL[h], inR[h], Val(M+1))
-
-            updategridendchunk!(grid, i, j, above0, cur, belowM, R)
-            lg.outhalosleft[h], lg.outhalosright[h] = updatedchunkhalos(grid, i, j, M, H)
-        end
+        # Zero the last+1 cell
+        grid[lg.height+1,j] = zero(T)
     end
 
     return lg

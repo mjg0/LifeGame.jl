@@ -109,26 +109,28 @@ True and non-zero values indicate living cells; false and zero values indicate d
 """
 mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
     # TODO: parameterize, LifeGrid{T,H,LifeRule}
+    height::Int64
     width::Int64
     grid::Matrix{CLUSTER_TYPE}
     inhalosleft::Matrix{UInt8}
     inhalosright::Matrix{UInt8}
-    outhalosabove::Matrix{UInt8}
-    outhalosbelow::Matrix{UInt8}
+    outhalosleft::Matrix{UInt8}
+    outhalosright::Matrix{UInt8}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
-        # Create grid based on the supplied size
-        paddedheight = m+2
-        paddedpackedwidth = cld(n, CELLS_PER_CLUSTER)+2
-        grid = zeros(CLUSTER_TYPE, paddedheight, paddedpackedwidth)
-
         # Buffers
-        bufferheight = cld(m, sizeof(UInt8))
-        halos = ntuple(_->zeros(UInt16, bufferheight, paddedpackedwidth), 4)
+        bufferheight = cld(m+2, 8*sizeof(UInt8))
+        bufferwidth = cld(n, CELLS_PER_CLUSTER)+2
+        halos = ntuple(_->zeros(UInt8, bufferheight, bufferwidth), 4)
+
+        # Grid
+        gridheight = 8*sizeof(UInt8)*bufferheight+2
+        gridwidth = bufferwidth
+        grid = zeros(CLUSTER_TYPE, gridheight, gridwidth)
 
         # Return the LifeGrid
-        return new{LifeRule(rule)}(n, grid, halos...)
+        return new{LifeRule(rule)}(m, n, grid, halos...)
     end
 
     function LifeGrid(grid::BitArray; kw...)
@@ -145,7 +147,7 @@ end
 
 
 # Implement AbstractArray interface for LifeGrid
-Base.size(lg::LifeGrid) = size(lg.grid, 1)-2, lg.width
+Base.size(lg::LifeGrid) = lg.height, lg.width
 
 function indexlifegrid(i, j)
     I = i+1 # skip the padding cells
@@ -166,6 +168,7 @@ Base.@propagate_inbounds function Base.setindex!(lg::LifeGrid, val::Bool,
     lg.grid[I,J] = ifelse(val,
                           cluster |   FIRST_BIT >> shift,
                           cluster & ~(FIRST_BIT >> shift))
+    # TODO: update halos in here
     return val
 end
 
