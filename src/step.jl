@@ -17,7 +17,7 @@ function updatedhalos(left, current, right)
     return (current & ~(LAST_BIT | FIRST_BIT)) | lefthalo | righthalo
 end
 
-@inline @generated function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
+Base.@propagate_inbounds @inline @generated function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
     Hbits = 8*sizeof(H)
     Tbits = 8*sizeof(T)
     return quote
@@ -138,10 +138,10 @@ end
 #"""
 const _UInt = Unsigned
 
-@inline @generated function halotuple(grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
+Base.@propagate_inbounds @inline @generated function halotuple(grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
     ret = Expr(:tuple, (
-        :(updatedhalos(grid[i+$k,j], lhalo, rhalo, Val($k)))
-        for k in 0:8*sizeof(H)-1
+        :(updatedhalos(grid[i+$(k-1),j], lhalo, rhalo, Val($k)))
+        for k in 1:8*sizeof(H)
     )...)
     return quote
         @inbounds begin
@@ -150,53 +150,29 @@ const _UInt = Unsigned
     end
 end
 
-@generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above0, cur::NTuple{N,T}, belowB, rule)::NTuple{T,N} where {N,T}
-    updates = Expr(:block, (
-        :(grid[i,j] = updatedcluster(above0, cur[1], cur[2], rule)),
-        (
-            :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule))
-            for k in 2:N-1
-        )...,
-        :(grid[i+$(N-1),j] = updatedcluster(cur[$(N-1)], cur[$N], belowB, rule))
-    )...)
+#Base.@propagate_inbounds @inline @generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above0, cur::NTuple{N,T}, belowB, rule) where {N,T}
+#    return Expr(:block, (
+#        :(grid[i,j] = updatedcluster(above0, cur[1], cur[2], rule)),
+#        (
+#            :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule))
+#            for k in 2:N-1
+#        )...,
+#        :(grid[i+$(N-1),j] = updatedcluster(cur[$(N-1)], cur[$N], belowB, rule)),
+#        :(return nothing)
+#    )...)
+#end
 
+Base.@propagate_inbounds @inline @generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above, cur::NTuple{N,T}, below, rule::LifeRule) where {N,T}
     return quote
-        @inbounds begin
-            $updates
+        grid[i,j] = updatedcluster(above, cur[1], cur[2], rule)
+        @simd for k in 1:$(N-2)
+            grid[i+k,j] = updatedcluster(cur[k], cur[k+1], cur[k+2], rule)
         end
-        return nothing
+        grid[i+$(N-1),j] = updatedcluster(cur[end-1], cur[end], below, rule)
     end
 end
 
-@generated function updategridendchunk!(grid, i, j, above0, cur::NTuple{M,T}, belowM, rule) where {T,M}
-    if M == 1
-        return quote
-            @inbounds grid[i,j] = updatedcluster(above0, cur[1], belowM, rule)
-            return nothing
-        end
-    end
-    stores = Expr(:block)
 
-    stores = if M == 1
-        Expr(:block, :(grid[i,j] = updatedcluster(above0, cur[i], belowM, rule)))
-    else
-        Expr(:block, (
-            :(grid[i, j] = updatedcluster(above0, cur[1], cur[2], rule)),
-            (
-                :(grid[i+$k-1,j] = updatedcluster(cur[$k-1], cur[$k], cur[$k+1], rule))
-                for k in 2:M-1
-            )...,
-            :(grid[i+$M-1,j] = updatedcluster(cur[$M-1], cur[$M], belowM, rule))
-        )...)
-    end
-
-    return quote
-        @inbounds begin
-            $stores
-        end
-        return nothing
-    end
-end
 
 function stepraw!(lg::LifeGrid{R}, dummy) where {R}
     H = eltype(lg.inhalosleft)
@@ -215,10 +191,10 @@ function stepraw!(lg::LifeGrid{R}, dummy) where {R}
         current = halotuple(grid, inhalosleft[begin], inhalosright[begin], 2, j)
 
         # Update this row
-        @simd for I in firstindex(inhalosleft):lastindex(inhalosleft)-1
+        for I in firstindex(inhalosleft):lastindex(inhalosleft)-1
             i = (I-1)*Hbits+2
 
-            next    = halotuple(grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
+            next = halotuple(grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
 
             updategridchunk!(grid, i, j, above, current, next[1], R)
             outhalosleft[I], outhalosright[I] = updatedchunkhalos(grid, i, j, H)

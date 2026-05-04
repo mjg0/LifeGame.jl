@@ -112,20 +112,20 @@ mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
     height::Int64
     width::Int64
     grid::Matrix{CLUSTER_TYPE}
-    inhalosleft::Matrix{UInt8}
-    inhalosright::Matrix{UInt8}
-    outhalosleft::Matrix{UInt8}
-    outhalosright::Matrix{UInt8}
+    inhalosleft::Matrix{UInt64}
+    inhalosright::Matrix{UInt64}
+    outhalosleft::Matrix{UInt64}
+    outhalosright::Matrix{UInt64}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
         # Buffers
-        bufferheight = cld(m+2, 8*sizeof(UInt8))
+        bufferheight = cld(m+2, 8*sizeof(UInt64))
         bufferwidth = cld(n, CELLS_PER_CLUSTER)+2
-        halos = ntuple(_->zeros(UInt8, bufferheight, bufferwidth), 4)
+        halos = ntuple(_->zeros(UInt64, bufferheight, bufferwidth), 4)
 
         # Grid
-        gridheight = 8*sizeof(UInt8)*bufferheight+2
+        gridheight = 8*sizeof(UInt64)*bufferheight+2
         gridwidth = bufferwidth
         grid = zeros(CLUSTER_TYPE, gridheight, gridwidth)
 
