@@ -112,6 +112,8 @@ mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
     height::Int64
     width::Int64
     grid::Matrix{CType}
+    colbuffers1::Vector{Vector{CType}}
+    colbuffers2::Vector{Vector{CType}}
     inhalosleft::Matrix{HType}
     inhalosright::Matrix{HType}
     outhalosleft::Matrix{HType}
@@ -119,7 +121,7 @@ mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
-        sizetotype(N) = if N<=8
+        uint(N) = if N<=8
             UInt8
         elseif N<=16
             UInt16
@@ -129,22 +131,23 @@ mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
             UInt64
         end
 
-        HType = UInt16 # TODO
+        HType = UInt64 # TODO
         CType = UInt64 # TODO
         cellspercluster = 8*sizeof(CType)-2
 
         # Buffers
         bufferheight = cld(m+2, 8*sizeof(HType))
         bufferwidth = cld(n, cellspercluster)+2
-        halos = ntuple(_->zeros(UInt64, bufferheight, bufferwidth), 4)
+        halos = ntuple(_->zeros(HType, bufferheight, bufferwidth), 4)
+        colbuffers = ntuple(_->[zeros(CType, 8*sizeof(HType)+2) for _ in 1:Threads.nthreads()], 2)
 
         # Grid
-        gridheight = 8*sizeof(UInt64)*bufferheight+2
+        gridheight = 8*sizeof(HType)*bufferheight+2
         gridwidth = bufferwidth
         grid = zeros(CType, gridheight, gridwidth)
 
         # Return the LifeGrid
-        return new{LifeRule(rule),CType,HType}(m, n, grid, halos...)
+        return new{LifeRule(rule),CType,HType}(m, n, grid, colbuffers..., halos...)
     end
 
     function LifeGrid(grid::BitArray; kw...)
@@ -171,17 +174,19 @@ function indexlifegrid(i, j)
 end
 
 Base.@propagate_inbounds function Base.getindex(lg::LifeGrid, i::Integer, j::Integer)
+    firstbit = one(C)<<(8*sizeof(C)-1)
     I, J, shift = indexlifegrid(i, j)
-    return ((lg.grid[I,J] << shift) & FIRST_BIT) == FIRST_BIT 
+    return ((lg.grid[I,J] << shift) & firstbit) == firstbit
 end
 
-Base.@propagate_inbounds function Base.setindex!(lg::LifeGrid, val::Bool,
-                                                 i::Integer, j::Integer)
+Base.@propagate_inbounds function Base.setindex!(lg::LifeGrid{R,C,H}, val::Bool,
+                                                 i::Integer, j::Integer) where {R,C,H}
+    firstbit = one(C)<<(8*sizeof(C)-1)
     I, J, shift = indexlifegrid(i, j)
     cluster = lg.grid[I,J]
     lg.grid[I,J] = ifelse(val,
-                          cluster |   FIRST_BIT >> shift,
-                          cluster & ~(FIRST_BIT >> shift))
+                          cluster |   firstbit >> shift,
+                          cluster & ~(firstbit >> shift))
     # TODO: update halos in here
     return val
 end

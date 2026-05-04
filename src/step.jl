@@ -11,21 +11,36 @@ Flips the first bit of `current` to the value of the second-to-last bit of `left
 last active bit), and the last bit of `current` to the value of the second bit of `right`
 (`right`'s first active bit).
 """
-function updatedhalos(left, current, right)
-    lefthalo = (left & (LAST_BIT << 1)) << CELLS_PER_CLUSTER
-    righthalo = (right & (FIRST_BIT  >> 1)) >> CELLS_PER_CLUSTER
-    return (current & ~(LAST_BIT | FIRST_BIT)) | lefthalo | righthalo
+function updatedhalos(left::T, current::T, right::T) where T
+    N = 8*sizeof(T)
+    firstbit = one(T) << (N-1)
+    lastbit = one(T)
+
+    lefthalo = (left & (lastbit    << 1)) << (N-2)
+    righthalo = (right & (firstbit >> 1)) >> (N-2)
+    return (current & ~(lastbit | firstbit)) | lefthalo | righthalo
 end
 
-Base.@propagate_inbounds @inline @generated function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
+Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
     Hbits = 8*sizeof(H)
     Tbits = 8*sizeof(T)
-    return quote
-        centermask = (typemax(T) << 2) >> 1
-        lbit = T(lefthalo  >> $(Hbits-K) & one(H)) << $(Tbits-1)
-        rbit = T(righthalo >> $(Hbits-K) & one(H))
-        return (cluster & centermask) | lbit | rbit
-    end
+
+    centermask = (typemax(T) << 2) >> 1
+    lbit = T(lefthalo  >> (Hbits-K) & one(H)) << (Tbits-1)
+    rbit = T(righthalo >> (Hbits-K) & one(H))
+
+    return (cluster & centermask) | lbit | rbit
+end
+
+Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, k::Integer) where {T,H,K}
+    Hbits = 8*sizeof(H)
+    Tbits = 8*sizeof(T)
+
+    centermask = (typemax(T) << 2) >> 1
+    lbit = T(lefthalo  >> (Hbits-k) & one(H)) << (Tbits-1)
+    rbit = T(righthalo >> (Hbits-k) & one(H))
+
+    return (cluster & centermask) | lbit | rbit
 end
 
 #@inline function updatebdchunkhalos(block::NTuple{N,T}, ::Type{H}) where {N,T<:Unsigned,H<:Unsigned}
@@ -151,19 +166,21 @@ end
 #computations are aided by having padding columns to the left and right of the first and last
 #active grids.
 #"""
-const _UInt = Unsigned
-
 Base.@propagate_inbounds @inline @generated function halotuple(grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
-    ret = Expr(:tuple, (
+    return Expr(:tuple, (
         :(updatedhalos(grid[i+$(k-1),j], lhalo, rhalo, Val($k)))
         for k in 1:8*sizeof(H)
     )...)
-    return quote
-        @inbounds begin
-            $ret
-        end
+end
+
+Base.@propagate_inbounds @inline function halotuple!(buffer::AbstractVector{T}, grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
+    N = 8*sizeof(H)
+    @simd for k in 1:N
+        buffer[k+1] = updatedhalos(grid[i+k-1,j], lhalo, rhalo, k)
     end
 end
+
+
 
 #Base.@propagate_inbounds @inline @generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above0, cur::NTuple{N,T}, belowB, rule) where {N,T}
 #    return Expr(:block, (
@@ -177,14 +194,18 @@ end
 #    )...)
 #end
 
-Base.@propagate_inbounds @inline @generated function updategridchunk!(lg::LifeGrid{R,C,H}, i, j, above, cur::NTuple{N,C}, below) where {R,C,H,N}
-    return quote
-        lg.grid[i,j] = updatedcluster(above, cur[1], cur[2], R)
-        @simd for k in 1:$(N-2)
-            lg.grid[i+k,j] = updatedcluster(cur[k], cur[k+1], cur[k+2], R)
-        end
-        lg.grid[i+$(N-1),j] = updatedcluster(cur[end-1], cur[end], below, R)
+Base.@propagate_inbounds @inline function updategridchunk!(lg::LifeGrid{R,C,H}, i, j, cur::AbstractVector{C}) where {R,C,H}
+    N = 8*sizeof(H)
+    @simd for k in 1:(N-2)
+        lg.grid[i+k-1,j] = updatedcluster(cur[k], cur[k+1], cur[k+2], R)
     end
+end
+
+Base.@propagate_inbounds @inline @generated function padtuple(t::NTuple{N,T}, front::T, back::T)::NTuple{N+2,T} where {N,T}
+    return Expr(:tuple,
+                :(front),
+                (:(t[$i]) for i in 1:N)...,
+                :(back))
 end
 
 
@@ -197,32 +218,42 @@ function stepraw!(lg::LifeGrid{R,C,H}, dummy) where {R,C,H}
     J1 = firstindex(lg.grid, 2)+1
     J2 = lastindex(lg.grid, 2)-1
 
-    @inbounds @batch for j in J1:J2
+    bufflen = Hbits+2
+
+    @inbounds @batch per=thread for j in J1:J2
+        current = lg.colbuffers1[Threads.threadid()]
+        next = lg.colbuffers2[Threads.threadid()]
         inhalosleft   = view(lg.inhalosright,  :, j-1)
         inhalosright  = view(lg.inhalosleft,   :, j+1)
         outhalosleft  = view(lg.outhalosleft,  :, j)
         outhalosright = view(lg.outhalosright, :, j)
 
         above = zero(C)
-        current = halotuple(grid, inhalosleft[begin], inhalosright[begin], 2, j)
+        halotuple!(current, grid, inhalosleft[begin], inhalosright[begin], 2, j)
+        #current = halotuple(grid, inhalosleft[begin], inhalosright[begin], 2, j)
 
         # Update this row
         for I in firstindex(inhalosleft):lastindex(inhalosleft)-1
             i = (I-1)*Hbits+2
 
-            next = halotuple(grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
+            #next = halotuple(grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
+            halotuple!(next, grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
+            current[1] = above
+            current[bufflen] = next[2]
 
-            updategridchunk!(lg, i, j, above, current, next[1])
+            updategridchunk!(lg, i, j, current)
             outhalosleft[I], outhalosright[I] = updatedchunkhalos(lg, i, j)
 
-            above = current[end]
+            above = current[bufflen-1]
             current, next = next, current
         end
 
         I = lastindex(inhalosleft)
         i = (I-1)*Hbits+2
 
-        updategridchunk!(lg, i, j, above, current, zero(C))
+        current[1] = above
+        current[bufflen] = zero(C)
+        updategridchunk!(lg, i, j, current)
         outhalosleft[I], outhalosright[I] = updatedchunkhalos(lg, i, j)
 
         # Zero the last+1 cell
