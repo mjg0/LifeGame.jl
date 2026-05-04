@@ -29,28 +29,43 @@ Base.@propagate_inbounds @inline @generated function updatedhalos(cluster::T, le
 end
 
 #@inline function updatebdchunkhalos(block::NTuple{N,T}, ::Type{H}) where {N,T<:Unsigned,H<:Unsigned}
-Base.@propagate_inbounds @inline @generated function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, ::Type{H}) where {T,H}
-    N = 8*sizeof(H)
+Base.@propagate_inbounds @inline function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, ::Type{H}) where {T,H}
+    lhalo = zero(H)
+    rhalo = zero(H)
 
     lshift = 8*sizeof(T)-2
     rshift = 1
 
-    updates = Expr(:block, Iterators.flatten((
-        (
-            :(lhalo |= H((grid[i+$(k-1), j] >> $lshift) & one(T)) << $(N-k)),
-            :(rhalo |= H((grid[i+$(k-1), j] >> $rshift) & one(T)) << $(N-k)),
-        ) for k in 1:N
-    ))...)
-
-    return quote
-        lhalo = zero(H)
-        rhalo = zero(H)
-
-        $(updates)
-
-        return lhalo, rhalo
+    N = 8*sizeof(H)
+    for k in 1:N
+        lhalo |= H((grid[i+k-1, j] >> lshift) & one(T)) << (N-k)
+        rhalo |= H((grid[i+k-1, j] >> rshift) & one(T)) << (N-k)
     end
+
+    return lhalo, rhalo
 end
+#Base.@propagate_inbounds @inline @generated function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, ::Type{H}) where {T,H}
+#    N = 8*sizeof(H)
+#
+#    lshift = 8*sizeof(T)-2
+#    rshift = 1
+#
+#    updates = Expr(:block, Iterators.flatten((
+#        (
+#            :(lhalo |= H((grid[i+$(k-1), j] >> $lshift) & one(T)) << $(N-k)),
+#            :(rhalo |= H((grid[i+$(k-1), j] >> $rshift) & one(T)) << $(N-k)),
+#        ) for k in 1:N
+#    ))...)
+#
+#    return quote
+#        lhalo = zero(H)
+#        rhalo = zero(H)
+#
+#        $(updates)
+#
+#        return lhalo, rhalo
+#    end
+#end
 
 
 
