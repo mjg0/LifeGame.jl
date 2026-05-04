@@ -16,10 +16,12 @@ function updatedhalos(left::T, current::T, right::T) where T
     firstbit = one(T) << (N-1)
     lastbit = one(T)
 
-    lefthalo = (left & (lastbit    << 1)) << (N-2)
+    lefthalo  = (left  & (lastbit  << 1)) << (N-2)
     righthalo = (right & (firstbit >> 1)) >> (N-2)
     return (current & ~(lastbit | firstbit)) | lefthalo | righthalo
 end
+
+
 
 Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, ::Val{K}) where {T,H,K}
     Hbits = 8*sizeof(H)
@@ -32,7 +34,7 @@ Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, 
     return (cluster & centermask) | lbit | rbit
 end
 
-Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, k::Integer) where {T,H,K}
+Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, righthalo::H, k::Integer) where {T,H}
     Hbits = 8*sizeof(H)
     Tbits = 8*sizeof(T)
 
@@ -43,7 +45,6 @@ Base.@propagate_inbounds @inline function updatedhalos(cluster::T, lefthalo::H, 
     return (cluster & centermask) | lbit | rbit
 end
 
-#@inline function updatebdchunkhalos(block::NTuple{N,T}, ::Type{H}) where {N,T<:Unsigned,H<:Unsigned}
 Base.@propagate_inbounds @inline function updatedchunkhalos(lg::LifeGrid{R,C,H}, i, j) where {R,C,H}
     lhalo = zero(H)
     rhalo = zero(H)
@@ -59,28 +60,6 @@ Base.@propagate_inbounds @inline function updatedchunkhalos(lg::LifeGrid{R,C,H},
 
     return lhalo, rhalo
 end
-#Base.@propagate_inbounds @inline @generated function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, ::Type{H}) where {T,H}
-#    N = 8*sizeof(H)
-#
-#    lshift = 8*sizeof(T)-2
-#    rshift = 1
-#
-#    updates = Expr(:block, Iterators.flatten((
-#        (
-#            :(lhalo |= H((grid[i+$(k-1), j] >> $lshift) & one(T)) << $(N-k)),
-#            :(rhalo |= H((grid[i+$(k-1), j] >> $rshift) & one(T)) << $(N-k)),
-#        ) for k in 1:N
-#    ))...)
-#
-#    return quote
-#        lhalo = zero(H)
-#        rhalo = zero(H)
-#
-#        $(updates)
-#
-#        return lhalo, rhalo
-#    end
-#end
 
 
 
@@ -109,12 +88,12 @@ can improve performance by 10% for some rules. See the extended help for
 [`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
 Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
 """
-function step!(lg::LifeGrid; chunklength=DEFAULT_CHUNK_SIZE, parallel=size(lg, 1)>1024)
+function step!(lg::LifeGrid; parallel=size(lg, 1)>1024)
     if parallel
-        return stepraw!(lg, chunklength)
+        return stepraw!(lg)
     else
         disable_polyester_threads() do
-            return stepraw!(lg, chunklength)
+            return stepraw!(lg)
         end
     end
 end
@@ -166,12 +145,6 @@ end
 #computations are aided by having padding columns to the left and right of the first and last
 #active grids.
 #"""
-Base.@propagate_inbounds @inline @generated function halotuple(grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
-    return Expr(:tuple, (
-        :(updatedhalos(grid[i+$(k-1),j], lhalo, rhalo, Val($k)))
-        for k in 1:8*sizeof(H)
-    )...)
-end
 
 Base.@propagate_inbounds @inline function halotuple!(buffer::AbstractVector{T}, grid::AbstractMatrix{T}, lhalo::H, rhalo::H, i, j) where {T,H}
     N = 8*sizeof(H)
@@ -182,18 +155,6 @@ end
 
 
 
-#Base.@propagate_inbounds @inline @generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above0, cur::NTuple{N,T}, belowB, rule) where {N,T}
-#    return Expr(:block, (
-#        :(grid[i,j] = updatedcluster(above0, cur[1], cur[2], rule)),
-#        (
-#            :(grid[i+$(k-1),j] = updatedcluster(cur[$(k-1)], cur[$k], cur[$(k+1)], rule))
-#            for k in 2:N-1
-#        )...,
-#        :(grid[i+$(N-1),j] = updatedcluster(cur[$(N-1)], cur[$N], belowB, rule)),
-#        :(return nothing)
-#    )...)
-#end
-
 Base.@propagate_inbounds @inline function updategridchunk!(lg::LifeGrid{R,C,H}, i, j, cur::AbstractVector{C}) where {R,C,H}
     N = 8*sizeof(H)
     @simd for k in 1:(N-2)
@@ -201,16 +162,9 @@ Base.@propagate_inbounds @inline function updategridchunk!(lg::LifeGrid{R,C,H}, 
     end
 end
 
-Base.@propagate_inbounds @inline @generated function padtuple(t::NTuple{N,T}, front::T, back::T)::NTuple{N+2,T} where {N,T}
-    return Expr(:tuple,
-                :(front),
-                (:(t[$i]) for i in 1:N)...,
-                :(back))
-end
 
 
-
-function stepraw!(lg::LifeGrid{R,C,H}, dummy) where {R,C,H}
+function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
     Hbits = 8*sizeof(H)
 
     grid = lg.grid
@@ -220,9 +174,10 @@ function stepraw!(lg::LifeGrid{R,C,H}, dummy) where {R,C,H}
 
     bufflen = Hbits+2
 
-    @inbounds @batch per=thread for j in J1:J2
+    @inbounds @batch for j in J1:J2
         current = lg.colbuffers1[Threads.threadid()]
         next = lg.colbuffers2[Threads.threadid()]
+
         inhalosleft   = view(lg.inhalosright,  :, j-1)
         inhalosright  = view(lg.inhalosleft,   :, j+1)
         outhalosleft  = view(lg.outhalosleft,  :, j)

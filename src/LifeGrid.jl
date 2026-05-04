@@ -173,7 +173,7 @@ function indexlifegrid(i, j)
     return I, J, shift
 end
 
-Base.@propagate_inbounds function Base.getindex(lg::LifeGrid, i::Integer, j::Integer)
+Base.@propagate_inbounds function Base.getindex(lg::LifeGrid{R,C,H}, i::Integer, j::Integer) where {R,C,H}
     firstbit = one(C)<<(8*sizeof(C)-1)
     I, J, shift = indexlifegrid(i, j)
     return ((lg.grid[I,J] << shift) & firstbit) == firstbit
