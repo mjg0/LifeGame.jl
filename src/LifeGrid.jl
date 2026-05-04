@@ -107,30 +107,44 @@ Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 
 True and non-zero values indicate living cells; false and zero values indicate dead cells.
 """
-mutable struct LifeGrid{LifeRule} <: AbstractMatrix{Bool}
+mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
     # TODO: parameterize, LifeGrid{T,H,LifeRule}
     height::Int64
     width::Int64
-    grid::Matrix{CLUSTER_TYPE}
-    inhalosleft::Matrix{UInt64}
-    inhalosright::Matrix{UInt64}
-    outhalosleft::Matrix{UInt64}
-    outhalosright::Matrix{UInt64}
+    grid::Matrix{CType}
+    inhalosleft::Matrix{HType}
+    inhalosright::Matrix{HType}
+    outhalosleft::Matrix{HType}
+    outhalosright::Matrix{HType}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
+        sizetotype(N) = if N<=8
+            UInt8
+        elseif N<=16
+            UInt16
+        elseif N<=32
+            UInt32
+        else
+            UInt64
+        end
+
+        HType = UInt16 # TODO
+        CType = UInt64 # TODO
+        cellspercluster = 8*sizeof(CType)-2
+
         # Buffers
-        bufferheight = cld(m+2, 8*sizeof(UInt64))
-        bufferwidth = cld(n, CELLS_PER_CLUSTER)+2
+        bufferheight = cld(m+2, 8*sizeof(HType))
+        bufferwidth = cld(n, cellspercluster)+2
         halos = ntuple(_->zeros(UInt64, bufferheight, bufferwidth), 4)
 
         # Grid
         gridheight = 8*sizeof(UInt64)*bufferheight+2
         gridwidth = bufferwidth
-        grid = zeros(CLUSTER_TYPE, gridheight, gridwidth)
+        grid = zeros(CType, gridheight, gridwidth)
 
         # Return the LifeGrid
-        return new{LifeRule(rule)}(m, n, grid, halos...)
+        return new{LifeRule(rule),CType,HType}(m, n, grid, halos...)
     end
 
     function LifeGrid(grid::BitArray; kw...)

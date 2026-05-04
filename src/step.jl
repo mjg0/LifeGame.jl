@@ -29,17 +29,17 @@ Base.@propagate_inbounds @inline @generated function updatedhalos(cluster::T, le
 end
 
 #@inline function updatebdchunkhalos(block::NTuple{N,T}, ::Type{H}) where {N,T<:Unsigned,H<:Unsigned}
-Base.@propagate_inbounds @inline function updatedchunkhalos(grid::AbstractMatrix{T}, i, j, ::Type{H}) where {T,H}
+Base.@propagate_inbounds @inline function updatedchunkhalos(lg::LifeGrid{R,C,H}, i, j) where {R,C,H}
     lhalo = zero(H)
     rhalo = zero(H)
 
-    lshift = 8*sizeof(T)-2
+    lshift = 8*sizeof(C)-2
     rshift = 1
 
     N = 8*sizeof(H)
     for k in 1:N
-        lhalo |= H((grid[i+k-1, j] >> lshift) & one(T)) << (N-k)
-        rhalo |= H((grid[i+k-1, j] >> rshift) & one(T)) << (N-k)
+        lhalo |= H((lg.grid[i+k-1, j] >> lshift) & one(C)) << (N-k)
+        rhalo |= H((lg.grid[i+k-1, j] >> rshift) & one(C)) << (N-k)
     end
 
     return lhalo, rhalo
@@ -177,32 +177,33 @@ end
 #    )...)
 #end
 
-Base.@propagate_inbounds @inline @generated function updategridchunk!(grid::AbstractMatrix{T}, i, j, above, cur::NTuple{N,T}, below, rule::LifeRule) where {N,T}
+Base.@propagate_inbounds @inline @generated function updategridchunk!(lg::LifeGrid{R,C,H}, i, j, above, cur::NTuple{N,C}, below) where {R,C,H,N}
     return quote
-        grid[i,j] = updatedcluster(above, cur[1], cur[2], rule)
+        lg.grid[i,j] = updatedcluster(above, cur[1], cur[2], R)
         @simd for k in 1:$(N-2)
-            grid[i+k,j] = updatedcluster(cur[k], cur[k+1], cur[k+2], rule)
+            lg.grid[i+k,j] = updatedcluster(cur[k], cur[k+1], cur[k+2], R)
         end
-        grid[i+$(N-1),j] = updatedcluster(cur[end-1], cur[end], below, rule)
+        lg.grid[i+$(N-1),j] = updatedcluster(cur[end-1], cur[end], below, R)
     end
 end
 
 
 
-function stepraw!(lg::LifeGrid{R}, dummy) where {R}
-    H = eltype(lg.inhalosleft)
-    T = eltype(lg.grid)
+function stepraw!(lg::LifeGrid{R,C,H}, dummy) where {R,C,H}
     Hbits = 8*sizeof(H)
 
     grid = lg.grid
 
-    @inbounds for j in firstindex(lg.grid, 2)+1:lastindex(lg.grid, 2)-1
+    J1 = firstindex(lg.grid, 2)+1
+    J2 = lastindex(lg.grid, 2)-1
+
+    @inbounds @batch for j in J1:J2
         inhalosleft   = view(lg.inhalosright,  :, j-1)
         inhalosright  = view(lg.inhalosleft,   :, j+1)
         outhalosleft  = view(lg.outhalosleft,  :, j)
         outhalosright = view(lg.outhalosright, :, j)
 
-        above = zero(T)
+        above = zero(C)
         current = halotuple(grid, inhalosleft[begin], inhalosright[begin], 2, j)
 
         # Update this row
@@ -211,8 +212,8 @@ function stepraw!(lg::LifeGrid{R}, dummy) where {R}
 
             next = halotuple(grid, inhalosleft[I+1], inhalosright[I+1], i+Hbits, j)
 
-            updategridchunk!(grid, i, j, above, current, next[1], R)
-            outhalosleft[I], outhalosright[I] = updatedchunkhalos(grid, i, j, H)
+            updategridchunk!(lg, i, j, above, current, next[1])
+            outhalosleft[I], outhalosright[I] = updatedchunkhalos(lg, i, j)
 
             above = current[end]
             current, next = next, current
@@ -221,11 +222,11 @@ function stepraw!(lg::LifeGrid{R}, dummy) where {R}
         I = lastindex(inhalosleft)
         i = (I-1)*Hbits+2
 
-        updategridchunk!(grid, i, j, above, current, zero(T), R)
-        outhalosleft[I], outhalosright[I] = updatedchunkhalos(grid, i, j, H)
+        updategridchunk!(lg, i, j, above, current, zero(C))
+        outhalosleft[I], outhalosright[I] = updatedchunkhalos(lg, i, j)
 
         # Zero the last+1 cell
-        grid[lg.height+1,j] = zero(T)
+        grid[lg.height+1,j] = zero(C)
     end
 
     return lg
