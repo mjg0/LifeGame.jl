@@ -131,8 +131,8 @@ mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
             UInt64
         end
 
-        HType = UInt64 # TODO
-        CType = UInt64 # TODO
+        HType = UInt64 # TODO uint(m)
+        CType = UInt64 # TODO uint(n+2)
         cellspercluster = 8*sizeof(CType)-2
 
         # Buffers
@@ -179,21 +179,43 @@ Base.@propagate_inbounds function Base.getindex(lg::LifeGrid{R,C,H}, i::Integer,
     return ((lg.grid[I,J] << shift) & firstbit) == firstbit
 end
 
-Base.@propagate_inbounds function Base.setindex!(lg::LifeGrid{R,C,H}, val::Bool,
-                                                 i::Integer, j::Integer) where {R,C,H}
-    firstbit = one(C)<<(8*sizeof(C)-1)
-    I, J, shift = indexlifegrid(i, j)
-    cluster = lg.grid[I,J]
-    lg.grid[I,J] = ifelse(val,
-                          cluster |   firstbit >> shift,
-                          cluster & ~(firstbit >> shift))
-    # TODO: update halos in here
-    return val
-end
+Base.@propagate_inbounds function
+Base.setindex!(lg::LifeGrid{R,C,H}, val::Number, i::Integer, j::Integer) where {R,C,H}
+    Cbits = 8*sizeof(C)
+    Hbits = 8*sizeof(H)
 
-Base.@propagate_inbounds function Base.setindex!(lg::LifeGrid, val::Number,
-                                                 i::Integer, j::Integer)
-    return lg[i,j] = val != zero(typeof(val))
+    firstbit = one(C) << (Cbits - 1)
+    I, J, shift = indexlifegrid(i, j)
+
+    cellmask = firstbit >> shift
+
+    cluster = lg.grid[I, J]
+    lg.grid[I, J] = ifelse(val != zero(val),
+                           cluster | cellmask,
+                           cluster & ~cellmask)
+
+    # Which vertical halo chunk contains row i?
+    hI = (I - 2) ÷ Hbits + 1
+    k  = (I - 2) % Hbits + 1
+    hmask = one(H) << (Hbits - k)
+
+    # First active bit in a cluster: left edge.
+    if shift == 1
+        halo = lg.inhalosleft[hI, J]
+        lg.inhalosleft[hI, J] = ifelse(val != zero(val),
+                                       halo | hmask,
+                                       halo & ~hmask)
+    end
+
+    # Last active bit in a cluster: right edge.
+    if shift == Cbits-2
+        halo = lg.inhalosright[hI, J]
+        lg.inhalosright[hI, J] = ifelse(val != zero(val),
+                                        halo | hmask,
+                                        halo & ~hmask)
+    end
+
+    return val
 end
 
 
