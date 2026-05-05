@@ -119,7 +119,17 @@ end
 
 
 
-function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
+Base.@propagate_inbounds @inline function
+zerotrailing!(cells::AbstractVector, shift, ::Type{H}) where H
+    @simd for i in 1:8*sizeof(H)
+        cells[i] = (cells[i] >> shift) << shift
+    end
+end
+
+
+
+function stepraw!(lg::LifeGrid{R, C, H}) where {R, C, H}
+    Cbits = 8*sizeof(C)
     Hbits = 8*sizeof(H)
 
     grid = lg.grid
@@ -128,6 +138,8 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
     J2 = lastindex(lg.grid, 2)-1
 
     bufflen = Hbits+2
+
+    endshift = (Cbits-2)-size(lg,2)%(Cbits-2)+1
 
     @inbounds @batch for J in J1:J2
         current = lg.colbuffers1[Threads.threadid()]
@@ -150,6 +162,11 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
 
             updategridchunk!(gridchunk(lg, I, J), current, R, H)
 
+            # Zero trailing cells
+            if J==J2
+                zerotrailing!(gridchunk(lg, I, J), endshift, H)
+            end
+
             outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
 
             above = current[bufflen-1]
@@ -164,10 +181,14 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
 
         updategridchunk!(gridchunk(lg, I, J), current, R, H)
 
+        if J==J2
+            zerotrailing!(gridchunk(lg, I, J), endshift, H)
+        end
+
         outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
 
         # Zero the last+1 cell
-        grid[lg.height+1,J] = zero(C)
+        grid[lg.height+2,J] = zero(C)
     end
 
     lg.lefthalos[ 1], lg.lefthalos[ 2] = lg.lefthalos[ 2], lg.lefthalos[ 1]

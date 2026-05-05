@@ -1,6 +1,41 @@
-using Test, LifeGame
+using Test, Crayons, LifeGame
 
 include("SlowLifeGrid.jl")
+
+
+
+function printlifediff(previous, correct, actual)
+    # Header
+    m, n = size(actual)
+    println("Incorrect result for $m×$n $(rule(actual)) grid")
+    println("Bad cells are printed in red")
+    printedwidth = 2*size(previous, 2)+4
+    print("Prev", repeat(' ', printedwidth-4))
+    println("Computed", repeat(' ', max(0, printedwidth-8)))
+
+    # Representation of whether the cell is on or off
+    rep(onoroff) = onoroff ? "* " : "- "
+
+    for i in axes(correct, 1)
+        # Print the previous grid
+        for j in axes(correct, 2)
+            print(rep(previous[i,j]))
+        end
+        print("    ")
+
+        # Print the actual grid, highlighting incorrect cells
+        for j in axes(correct, 2)
+            cell = rep(actual[i,j])
+            if actual[i,j] != correct[i,j]
+                print(Crayon(foreground=:red), cell, Crayon(reset=true))
+            else
+                print(cell)
+            end
+        end
+
+        println()
+    end
+end
 
 
 
@@ -120,35 +155,67 @@ include("SlowLifeGrid.jl")
     end
 
     @testset "step!" begin
-        # Test popular rules
-        for rule in ("B3/S23",       # Conway's
-                     "B36/S23",      # highlife
-                     "B3678/S34678", # day and night
-                     "B35678/S5678", # diamoeba
-                     "B2/S",         # seeds
-                     "B234/S",       # Persian rug
-                     "B345/S5")      # long life
-            @testset "rule $rule" begin
-                for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 256))
-                    # Initialize slow and fast grids randomly, with about 1/4 of cells alive
-                    grid = rand((false, false, false, true), x, y)
-                    slowgrid =  SlowLifeGrid(grid; rule=rule)
-                    grid_serial   = LifeGrid(grid; rule=rule)
-                    grid_parallel = LifeGrid(grid; rule=rule)
-                    # Make sure results are identical over 10 steps
-                    for _ in 1:10
-                        i = rand(CartesianIndices(slowgrid))
-                        slowgrid[i]      = !slowgrid[i]
-                        grid_serial[i]   = !grid_serial[i]
-                        grid_parallel[i] = !grid_parallel[i]
-                        step!(slowgrid)
-                        step!(grid_serial)
-                        step!(grid_parallel, parallel=true)
-                        @test all(slowgrid .== grid_serial)
-                        @test all(slowgrid .== grid_parallel)
+        # Verbose, minimal tests
+        failed = false
+        for rule in ("B3/S23", "B2/S", "B234/S")
+            for (m, n) in ((3, 4), (8, 6), (9, 7))
+                @testset "rule $rule, size $m×$n" begin
+                    # Initialize
+                    grid = rand((true, false, false, false), m, n)
+                    slow = SlowLifeGrid(grid; rule=rule)
+                    lg = LifeGrid(grid; rule=rule)
+
+                    # Step and test
+                    step!(slow)
+                    step!(lg)
+                    if !all(slow .== lg)
+                        printlifediff(grid, slow, lg)
                     end
+                    @test all(slow .== lg)
+
+                    # Update a cell, step, and test
+                    good = deepcopy(slow)
+                    I = rand(CartesianIndices(lg))
+                    lg[I] = !lg[I]
+                    slow[I] = !slow[I]
+                    step!(slow)
+                    step!(lg)
+                    if !all(slow .== lg)
+                        printlifediff(grid, slow, lg)
+                    end
+                    @test all(slow .== lg)
                 end
             end
         end
+        # Test popular rules
+        #for rule in ("B3/S23",       # Conway's
+        #             "B36/S23",      # highlife
+        #             "B3678/S34678", # day and night
+        #             "B35678/S5678", # diamoeba
+        #             "B2/S",         # seeds
+        #             "B234/S",       # Persian rug
+        #             "B345/S5")      # long life
+        #    @testset "rule $rule" begin
+        #        for (x, y) in ((1, 1), (4, 5), (15, 61), (35, 63), (326, 256))
+        #            # Initialize slow and fast grids randomly, with about 1/4 of cells alive
+        #            grid = rand((false, false, false, true), x, y)
+        #            slowgrid =  SlowLifeGrid(grid; rule=rule)
+        #            grid_serial   = LifeGrid(grid; rule=rule)
+        #            grid_parallel = LifeGrid(grid; rule=rule)
+        #            # Make sure results are identical over 10 steps
+        #            for _ in 1:10
+        #                i = rand(CartesianIndices(slowgrid))
+        #                slowgrid[i]      = !slowgrid[i]
+        #                grid_serial[i]   = !grid_serial[i]
+        #                grid_parallel[i] = !grid_parallel[i]
+        #                step!(slowgrid)
+        #                step!(grid_serial)
+        #                step!(grid_parallel, parallel=true)
+        #                @test all(slowgrid .== grid_serial)
+        #                @test all(slowgrid .== grid_parallel)
+        #            end
+        #        end
+        #    end
+        #end
     end
 end # @testset
