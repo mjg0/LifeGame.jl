@@ -102,8 +102,8 @@ end
 `in` should be two elements longer than `out`
 """
 Base.@propagate_inbounds @inline function
-updategridchunk!(out::AbstractVector, in::AbstractVector, rule::R) where R
-    @simd for i in eachindex(out)
+updategridchunk!(out::AbstractVector, in::AbstractVector, rule::R, ::Type{H}) where {R, H}
+    @simd for i in 1:8*sizeof(H)
         out[i] = updatedcluster(in[i], in[i+1], in[i+2], rule)
     end
 end
@@ -148,7 +148,7 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
             current[1] = above
             current[bufflen] = next[2]
 
-            updategridchunk!(gridchunk(lg, I, J), current, R)
+            updategridchunk!(gridchunk(lg, I, J), current, R, H)
 
             outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
 
@@ -158,11 +158,12 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
         end
 
         I = lastindex(inhalosleft)
-        i = (I-1)*Hbits+2
 
         current[1] = above
         current[bufflen] = zero(C)
-        updategridchunk!(gridchunk(lg, I, J), current, R)
+
+        updategridchunk!(gridchunk(lg, I, J), current, R, H)
+
         outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
 
         # Zero the last+1 cell
