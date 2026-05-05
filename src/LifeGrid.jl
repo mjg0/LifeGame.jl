@@ -107,17 +107,14 @@ Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 
 True and non-zero values indicate living cells; false and zero values indicate dead cells.
 """
-mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
-    # TODO: parameterize, LifeGrid{T,H,LifeRule}
+struct LifeGrid{LifeRule, CType, HType} <: AbstractMatrix{Bool}
     height::Int64
     width::Int64
     grid::Matrix{CType}
     colbuffers1::Vector{Vector{CType}}
     colbuffers2::Vector{Vector{CType}}
-    inhalosleft::Matrix{HType}
-    inhalosright::Matrix{HType}
-    outhalosleft::Matrix{HType}
-    outhalosright::Matrix{HType}
+    lefthalos::Vector{Matrix{HType}}
+    righthalos::Vector{Matrix{HType}}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
@@ -140,6 +137,7 @@ mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
         bufferwidth = cld(n, cellspercluster)+2
         halos = ntuple(_->zeros(HType, bufferheight, bufferwidth), 4)
         colbuffers = ntuple(_->[zeros(CType, 8*sizeof(HType)+2) for _ in 1:Threads.nthreads()], 2)
+        halos = ntuple(_->[zeros(HType, bufferheight, bufferwidth) for _ in 1:2], 2)
 
         # Grid
         gridheight = 8*sizeof(HType)*bufferheight+2
@@ -147,7 +145,7 @@ mutable struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
         grid = zeros(CType, gridheight, gridwidth)
 
         # Return the LifeGrid
-        return new{LifeRule(rule),CType,HType}(m, n, grid, colbuffers..., halos...)
+        return new{LifeRule(rule), CType, HType}(m, n, grid, colbuffers..., halos...)
     end
 
     function LifeGrid(grid::BitArray; kw...)
@@ -201,16 +199,16 @@ Base.setindex!(lg::LifeGrid{R,C,H}, val::Number, i::Integer, j::Integer) where {
 
     # First active bit in a cluster: left edge.
     if shift == 1
-        halo = lg.inhalosleft[hI, J]
-        lg.inhalosleft[hI, J] = ifelse(val != zero(val),
+        halo = lg.lefthalos[1][hI, J]
+        lg.lefthalos[1][hI, J] = ifelse(val != zero(val),
                                        halo | hmask,
                                        halo & ~hmask)
     end
 
     # Last active bit in a cluster: right edge.
     if shift == Cbits-2
-        halo = lg.inhalosright[hI, J]
-        lg.inhalosright[hI, J] = ifelse(val != zero(val),
+        halo = lg.righthalos[1][hI, J]
+        lg.righthalos[1][hI, J] = ifelse(val != zero(val),
                                         halo | hmask,
                                         halo & ~hmask)
     end

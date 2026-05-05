@@ -24,10 +24,10 @@ end
 
 
 
-Base.@propagate_inbounds @inline function
-updatedchunkhalos(lg::LifeGrid{R, C, H}, i, j) where {R, C, H}
-    return updatedchunkhalos(view(lg.grid, i:i+8*sizeof(H)-1, j), H)
-end
+#Base.@propagate_inbounds @inline function
+#updatedchunkhalos(lg::LifeGrid{R, C, H}, i, j) where {R, C, H}
+#    return updatedchunkhalos(view(lg.grid, i:i+8*sizeof(H)-1, j), H)
+#end
 
 
 
@@ -113,7 +113,7 @@ end
 Base.@propagate_inbounds @inline function
 gridchunk(lg::LifeGrid{R, C, H}, I, J) where {R, C, H}
     Hbits = 8*sizeof(H)
-    i = (I-1)*Hbits-2
+    i = (I-1)*Hbits+2
     return view(lg.grid, i:i+Hbits-1, J)
 end
 
@@ -133,10 +133,10 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
         current = lg.colbuffers1[Threads.threadid()]
         next = lg.colbuffers2[Threads.threadid()]
 
-        inhalosleft   = view(lg.inhalosright,  :, J-1)
-        inhalosright  = view(lg.inhalosleft,   :, J+1)
-        outhalosleft  = view(lg.outhalosleft,  :, J)
-        outhalosright = view(lg.outhalosright, :, J)
+        inhalosleft   = view(lg.righthalos[1], :, J-1)
+        inhalosright  = view(lg.lefthalos[ 1], :, J+1)
+        outhalosleft  = view(lg.lefthalos[ 2], :, J)
+        outhalosright = view(lg.righthalos[2], :, J)
 
         above = zero(C)
         updatehalos!(current, gridchunk(lg, 1, J), inhalosleft[1], inhalosright[1])
@@ -170,7 +170,8 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
         grid[lg.height+1,J] = zero(C)
     end
 
-    lg.inhalosleft, lg.inhalosright, lg.outhalosleft, lg.outhalosright = lg.outhalosleft, lg.outhalosright, lg.inhalosleft, lg.inhalosright
+    lg.lefthalos[ 1], lg.lefthalos[ 2] = lg.lefthalos[ 2], lg.lefthalos[ 1]
+    lg.righthalos[1], lg.righthalos[2] = lg.righthalos[2], lg.righthalos[1]
 
     return lg
 end
