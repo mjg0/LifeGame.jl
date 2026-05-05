@@ -74,6 +74,19 @@ end
 
 
 
+# Function to convert a number of bits to an unsigned integer that will contain them
+smallestuint(N) = if N<=8
+    UInt8
+elseif N<=16
+    UInt16
+elseif N<=32
+    UInt32
+else
+    UInt64
+end
+
+
+
 """
     LifeGrid <: AbstractMatrix{Bool}
 
@@ -117,26 +130,17 @@ struct LifeGrid{LifeRule, CType, HType} <: AbstractMatrix{Bool}
     righthalos::Vector{Matrix{HType}}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
-    function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23")
-        uint(N) = if N<=8
-            UInt8
-        elseif N<=16
-            UInt16
-        elseif N<=32
-            UInt32
-        else
-            UInt64
-        end
-
-        HType = UInt64 # TODO uint(m)
-        CType = UInt64 # TODO uint(n+2)
+    function LifeGrid(m::Integer, n::Integer; rule::AbstractString="B3/S23",
+                      CType::Type{<:Unsigned}=smallestuint(n+2),
+                      HType::Type{<:Unsigned}=smallestuint(m))
         cellspercluster = 8*sizeof(CType)-2
 
         # Buffers
-        bufferheight = cld(m+2, 8*sizeof(HType))
+        bufferheight = cld(m, 8*sizeof(HType))
         bufferwidth = cld(n, cellspercluster)+2
         halos = ntuple(_->zeros(HType, bufferheight, bufferwidth), 4)
-        colbuffers = ntuple(_->[zeros(CType, 8*sizeof(HType)+2) for _ in 1:Threads.nthreads()], 2)
+        colbuffers = ntuple(_->[zeros(CType, 8*sizeof(HType)+2)
+                                for _ in 1:Threads.nthreads()], 2)
         halos = ntuple(_->[zeros(HType, bufferheight, bufferwidth) for _ in 1:2], 2)
 
         # Grid
@@ -164,26 +168,31 @@ end
 # Implement AbstractArray interface for LifeGrid
 Base.size(lg::LifeGrid) = lg.height, lg.width
 
-function indexlifegrid(i, j)
-    I = i+1 # skip the padding cells
-    J = (j-1)÷CELLS_PER_CLUSTER+2 # add one for 1-index arrays
-    shift = (j-1)%CELLS_PER_CLUSTER+1
+function indexlifegrid(lg::LifeGrid{R, C, H}, i, j) where {R, C, H}
+    Cbits = 8*sizeof(C)
+
+    I = i+1 # skip padding column
+    J = (j-1)÷(Cbits-2)+2
+    shift = (j-1)%(Cbits-2)+1
+
     return I, J, shift
 end
 
 Base.@propagate_inbounds function Base.getindex(lg::LifeGrid{R,C,H}, i::Integer, j::Integer) where {R,C,H}
-    firstbit = one(C)<<(8*sizeof(C)-1)
-    I, J, shift = indexlifegrid(i, j)
+    I, J, shift = indexlifegrid(lg, i, j)
+
+    firstbit = one(C) << (8*sizeof(C)-1)
+
     return ((lg.grid[I,J] << shift) & firstbit) == firstbit
 end
 
 Base.@propagate_inbounds function
-Base.setindex!(lg::LifeGrid{R,C,H}, val::Number, i::Integer, j::Integer) where {R,C,H}
+Base.setindex!(lg::LifeGrid{R, C, H}, val::Number, i::Integer, j::Integer) where {R, C, H}
     Cbits = 8*sizeof(C)
     Hbits = 8*sizeof(H)
 
     firstbit = one(C) << (Cbits - 1)
-    I, J, shift = indexlifegrid(i, j)
+    I, J, shift = indexlifegrid(lg, i, j)
 
     cellmask = firstbit >> shift
 

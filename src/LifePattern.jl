@@ -161,7 +161,7 @@ Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, i::Integer, j::Inte
         # Might need to perform two insertions
         while bitsthiscolumn > 0
             # Figure out which cluster we're on
-            I, J, shift = indexlifegrid(i, j+insertedbits)
+            I, J, shift = indexlifegrid(lg, i, j+insertedbits)
             I, J = I-1, J-1 # compensate for the view starting at [begin+1,begin+1]
 
             # How many bits need to be inserted into this cluster?

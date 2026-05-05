@@ -139,7 +139,7 @@ function stepraw!(lg::LifeGrid{R, C, H}) where {R, C, H}
 
     bufflen = Hbits+2
 
-    endshift = (Cbits-2)-size(lg,2)%(Cbits-2)+1
+    endshift = mod(-size(lg, 2), Cbits-2)+1
 
     @inbounds @batch for J in J1:J2
         current = lg.colbuffers1[Threads.threadid()]
