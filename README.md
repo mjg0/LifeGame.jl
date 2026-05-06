@@ -87,49 +87,17 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 `LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on modern hardware. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes with 4 Julia threads on a laptop with an AMD 7640U:
 
-![Benchmark results, dense](img/benchmark-results.png)
+![Benchmark results, large](img/benchmark-results-large.png)
 
 **<details><summary>More</summary>**
 
 Such performance is attained by packing 62 cells into 64-bit operands and updating them simultaneously using bitwise operations; see the extended help for `LifeGrid`, `LifeGame.updatedcluster`, and `LifeGame.stepraw!` for algorithm details.
 
-The plot above was generated thus:
+Due to this packing, you'll see significantly better performance for even multiples of 62 at small sizes:
 
-```julia
-using LifeGame, BenchmarkTools, Plots
+![Benchmark results, small](img/benchmark-results-small.png)
 
-# Side lengths to test
-sidelengths = 2 .^(4:18)
-
-# Test in serial and parallel
-serialresults, parallelresults = (begin
-    # Warm up the CPU for 1 minute
-    t = time()
-    while time()-t < 60
-        step!(LifeGrid(1000, 1000), parallel=parallel)
-    end
-    # Get results for every side length
-    [begin
-        # Free up memory
-        GC.gc()
-        # Create the grid
-        lg = LifeGrid(sidelength, sidelength)
-        # Get and return results
-        chunklength = parallel ? min(cld(sidelength, Threads.nthreads()), 64) : 64
-        result = @benchmark step!($lg, parallel=$parallel, chunklength=$chunklength)
-        sidelength^2/mean(result.times)
-    end for sidelength in sidelengths]
-end for parallel in (false, true))
-
-# Plot and save results
-plot(sidelengths, serialresults, title="Cell updates per nanosecond",
-     label="serial", xlabel="LifeGrid side length", ylabel="Updates/ns",
-     legend_position=:topleft, marker=:circle, markerstrokewidth=0,
-     xscale=:log10, xticks=(sidelengths, sidelengths), xrotation=45,
-     margin=(5, :mm), size=(600, 400))
-plot!(sidelengths, parallelresults, label="parallel", marker=:circle, markerstrokewidth=0)
-png("benchmark-results.png")
-```
+The plots in this section were generated with [`examples/benchmark-plots.jl`](examples/benchmark-plots.jl).
 
 </details>
 
