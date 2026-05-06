@@ -185,10 +185,10 @@ function stepraw!(lg::LifeGrid{R, C, H}) where {R, C, H}
             zerotrailing!(gridchunk(lg, I, J), endshift, H)
         end
 
-        outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
-
         # Zero the last+1 cell
         grid[lg.height+2,J] = zero(C)
+
+        outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
     end
 
     lg.lefthalos[ 1], lg.lefthalos[ 2] = lg.lefthalos[ 2], lg.lefthalos[ 1]
