@@ -89,26 +89,21 @@ function indexpattern(i, j)
     return I, J, shift
 end
 
-Base.@propagate_inbounds function Base.getindex(pattern::LifePattern,
-                                                i::Integer, j::Integer)
+Base.@propagate_inbounds function
+Base.getindex(pattern::LifePattern, i::Integer, j::Integer)
     I, J, shift = indexpattern(i, j)
     return ((pattern.data[I,J] << shift) & 0x80) == 0x80
 end
 
-Base.@propagate_inbounds function Base.setindex!(pattern::LifePattern, val::Bool,
-                                                 i::Integer, j::Integer)
+Base.@propagate_inbounds function
+Base.setindex!(pattern::LifePattern, val::Number, i::Integer, j::Integer)
     I, J, shift = indexpattern(i, j)
     cluster = pattern.data[I,J]
     mask = 0x80 >> shift
-    pattern.data[I,J] = ifelse(val,
+    pattern.data[I,J] = ifelse(val != zero(val),
                                cluster |  mask,
                                cluster & ~mask)
     return val
-end
-
-Base.@propagate_inbounds function Base.setindex!(pattern::LifePattern, val::Number,
-                                                 i::Integer, j::Integer)
-    return pattern[i,j] = val != 0
 end
 
 
@@ -135,8 +130,9 @@ julia> insert!(LifeGrid(3, 5), 2, 2, LifePattern([0 1 0; 1 0 1]))
  0  1  0  1  0
 ```
 """
-Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, i::Integer, j::Integer,
-                                               pattern::LifePattern)
+Base.@propagate_inbounds function
+Base.insert!(lg::LifeGrid{R, C, H}, i::Integer, j::Integer, pattern::LifePattern
+            ) where {R, C, H}
     # We're only interested in the active clusters of lg
     grid = @view lg.grid[begin+1:end-1,begin+1:end-1] # check bounds if the caller wants to
 
@@ -165,15 +161,15 @@ Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, i::Integer, j::Inte
             I, J = I-1, J-1 # compensate for the view starting at [begin+1,begin+1]
 
             # How many bits need to be inserted into this cluster?
-            bitstoboundary = CELLS_PER_CLUSTER - shift + 1
+            bitstoboundary = 8*sizeof(C) - shift - 1
             toinsert = min(bitsthiscolumn, bitstoboundary)
 
             # Do the same thing for each row
             @simd for x in axes(pattern.data, 1)
                 # Which bits of the cluster are up for replacement?
-                mask = (typemax(CLUSTER_TYPE) << (gridtypebits-toinsert)) >> shift
+                mask = (typemax(C) << (gridtypebits-toinsert)) >> shift
                 # Get the actual values to be inserted
-                insert = ((CLUSTER_TYPE(pattern.data[x,y] << offset)
+                insert = ((C(pattern.data[x,y] << offset)
                            << (gridtypebits-patterntypebits)) >> shift) & mask
                 # Insert the appropriate portion of the pattern
                 grid[I+x-1, J] = (grid[I+x-1, J] & ~mask) | insert
@@ -192,19 +188,19 @@ end
 
 
 # Implement AbstractArray interface for LifePattern
-Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, I::CartesianIndex{2},
-                                               pattern::LifePattern)
+Base.@propagate_inbounds function
+Base.insert!(lg::LifeGrid, I::CartesianIndex{2}, pattern::LifePattern)
     return insert!(lg, Tuple(I)..., pattern)
 end
 
-Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, i::Integer, j::Integer,
-                                               pattern::AbstractMatrix)
+Base.@propagate_inbounds function
+Base.insert!(lg::LifeGrid, i::Integer, j::Integer, pattern::AbstractMatrix)
     m, n = size(pattern)
     lg[i:i+m-1,j:j+n-1] .= pattern
     return lg
 end
 
-Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, I::CartesianIndex{2},
-                                               pattern::AbstractMatrix)
+Base.@propagate_inbounds function
+Base.insert!(lg::LifeGrid, I::CartesianIndex{2}, pattern::AbstractMatrix)
     return insert!(lg, Tuple(I)..., pattern)
 end
