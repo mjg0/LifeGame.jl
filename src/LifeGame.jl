@@ -67,29 +67,17 @@ module LifeGame
 
 
 
-using Polyester
+using Polyester, SparseArrays
 
 
 
-const CLUSTER_TYPE = UInt64
-
-const CELLS_PER_CLUSTER = 8*sizeof(CLUSTER_TYPE)-2 # subtract 2 for halos at cell edges
-
-const FIRST_BIT = CLUSTER_TYPE(2)<<CELLS_PER_CLUSTER # 0b100...000
-
-const LAST_BIT = one(CLUSTER_TYPE)                   # 0b000...001
-
-const DEFAULT_CHUNK_SIZE = 64
-
-
+include("utils.jl")
 
 include("LifeGrid.jl")
 
 include("updatedcluster.jl")
 
 include("step.jl")
-
-include("LifePattern.jl")
 
 include("LifePatterns.jl")
 

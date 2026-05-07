@@ -32,23 +32,13 @@ end
 
 
 """
-    step!(lg::LifeGrid; chunklength=$DEFAULT_CHUNK_SIZE, parallel=size(lg, 1)>1024)
+    step!(lg::LifeGrid; parallel::Bool)
 
 Update `lg` one generation according to the [`rule`](@ref) associated with it.
 
 All cells outside of the grid boundary are fixed at zero.
 
-`step!` runs using all available threads by default.
-
-`chunklength` determines the size of a chunk of data that `step!` works on before proceeding
-to the next chunk. $DEFAULT_CHUNK_SIZE is chosen as the default since it strikes a good
-balance: it leads to chunks large enough that work isn't interrupted too often, and small
-enough to fit in the L1 cache of most machines. The height of `lg` must be at least
-`chunksize*Threads.nthreads()` for all threads to be fully engaged.
-
-`parallel` determines whether `step!` will run with multiple threads. It is `true` by
-default if `lg`'s height exceeds 1024, and `false` otherwise. This is a reasonable default
-on most machines, but it's worth experimenting with.
+By default, `parallel` is set to true if the grid backing `lg` has multiple columns.
 
 A generic algorithm for updating each cluster in the grid is used by default. The compiler
 does a decent job of optimizing for most rules, but hand-tuning the cluster update function
@@ -56,7 +46,7 @@ can improve performance by 10% for some rules. See the extended help for
 [`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
 Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
 """
-function step!(lg::LifeGrid; parallel=size(lg, 1)>1024)
+function step!(lg::LifeGrid; parallel=size(lg.grid, 2)>3)
     if parallel
         return stepraw!(lg)
     else

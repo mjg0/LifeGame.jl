@@ -1,27 +1,63 @@
 export LifePatterns
 
+
+
+# Optimization of insert! for sparse matrices
+Base.@propagate_inbounds function
+Base.insert!(lg::LifeGrid, I::CartesianIndex{2}, pattern::SparseMatrixCSC)
+    rows = rowvals(pattern)
+
+    for j in axes(pattern, 2)
+        for nz in nzrange(pattern, j)
+            i = rows[nz]
+            lg[I+CartesianIndex(i, j)-one(I)] = true
+        end
+    end
+
+    return lg
+end
+
+# Other matrices use `findall`, which is slow and allocating
+Base.@propagate_inbounds function
+Base.insert!(lg::LifeGrid, I::CartesianIndex{2}, pattern::AbstractMatrix{<:Number})
+    for i in CartesianIndices(pattern)
+        if pattern[i] != zero(eltype(pattern))
+            lg[I+i-one(I)] = true
+        end
+    end
+
+    return lg
+end
+
+Base.@propagate_inbounds function Base.insert!(lg::LifeGrid, i::Integer, j::Integer, pattern)
+    return insert!(lg, CartesianIndex(i, j), pattern)
+end
+
+
+
 """
     LifePatterns
 
-A collection of common [`LifePattern`](@ref)s that can be inserted into [`LifeGrid`](@ref)s.
+A collection of common patterns meant for insertion into [`LifeGrid`](@ref)s.
 """
 module LifePatterns
 
 
 
-import ..LifeGame.LifePattern
+using SparseArrays
 
 
 
-# Macro to tersely create a constant pattern
+# Macro to concisely create a constant pattern
 macro pattern(name, pattern)
     return quote
-        const $(esc(name)) = LifePattern($pattern)
+        const $(esc(name)) = sparse($pattern.!=0)
     end
 end
 
 
 
+# Patterns
 @pattern block          [1 1
                          1 1]
 

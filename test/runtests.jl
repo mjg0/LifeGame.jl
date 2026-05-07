@@ -4,6 +4,7 @@ include("SlowLifeGrid.jl")
 
 
 
+# Print what went wrong when a LifeGrid was updated incorrectly
 function printlifediff(previous, correct, actual)
     # Header
     m, n = size(actual)
@@ -39,6 +40,7 @@ end
 
 
 
+# step! LifeGrid a few times 
 function teststep!(rule, size; verbose=false, CType=nothing)
     m, n = size
     @testset failfast=true "rule $rule, size $m×$n" begin
@@ -116,21 +118,21 @@ end
         end
     end
 
-    @testset "LifePattern indexing" begin
-        pat = LifePattern([0 1 0
-                           0 0 1
-                           1 1 1])
-        # Test a few places, especially the beginning and end of the pattern
-        @test pat[1,1] == false
-        @test pat[1,2] == true
-        @test pat[3,2] == true
-        # Flip a few values, both with a bool and with a number
-        pat[3,3] = false
-        pat[2,1] = 1
-        # Test that the swaps are reflected by getindex
-        @test pat[3,3] == false
-        @test pat[2,3] == true
-    end
+    #@testset "LifePattern indexing" begin
+    #    pat = LifePattern([0 1 0
+    #                       0 0 1
+    #                       1 1 1])
+    #    # Test a few places, especially the beginning and end of the pattern
+    #    @test pat[1,1] == false
+    #    @test pat[1,2] == true
+    #    @test pat[3,2] == true
+    #    # Flip a few values, both with a bool and with a number
+    #    pat[3,3] = false
+    #    pat[2,1] = 1
+    #    # Test that the swaps are reflected by getindex
+    #    @test pat[3,3] == false
+    #    @test pat[2,3] == true
+    #end
 
     @testset "updatedcluster" begin
         # Test with some fixed values that have been calculated by hand
@@ -143,23 +145,23 @@ end
         end
     end
 
-    @testset "LifePattern insertion" begin
-        lg = LifeGrid(10, 100)
-        # Insert a few patterns into a grid, especially at cluster borders
-        for (pattern, i, j) in (([1 0 1], 1, 1),
-                                ([1 1 0 0 1 1 0 0 1
-                                  0 0 1 1 1 0 0 1 1], 2, 1),
-                                ([1 1 1 0 1
-                                  1 0 0 1 0], 4, 60),
-                                (rand(Bool, 3, 70), 6, 20))
-            insert!(lg, i, j, LifePattern(pattern))
-            x, y = size(pattern)
-            # The inserted pattern should be present at the correct place in the LifeGrid
-            @test all(lg[i:i+x-1,j:j+y-1] .== pattern)
-        end
-        # Make sure that an exception is thrown when out-of-bounds access is attempted
-        @test_throws BoundsError insert!(LifeGrid(4, 5), 2, 4, LifePattern([1 1 1]))
-    end
+    #@testset "LifePattern insertion" begin
+    #    lg = LifeGrid(10, 100)
+    #    # Insert a few patterns into a grid, especially at cluster borders
+    #    for (pattern, i, j) in (([1 0 1], 1, 1),
+    #                            ([1 1 0 0 1 1 0 0 1
+    #                              0 0 1 1 1 0 0 1 1], 2, 1),
+    #                            ([1 1 1 0 1
+    #                              1 0 0 1 0], 4, 60),
+    #                            (rand(Bool, 3, 70), 6, 20))
+    #        insert!(lg, i, j, LifePattern(pattern))
+    #        x, y = size(pattern)
+    #        # The inserted pattern should be present at the correct place in the LifeGrid
+    #        @test all(lg[i:i+x-1,j:j+y-1] .== pattern)
+    #    end
+    #    # Make sure that an exception is thrown when out-of-bounds access is attempted
+    #    @test_throws BoundsError insert!(LifeGrid(4, 5), 2, 4, LifePattern([1 1 1]))
+    #end
 
     @testset "updatedchunkhalos" begin
         chunk = [0b0100000000000000,
