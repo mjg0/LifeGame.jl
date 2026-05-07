@@ -79,6 +79,8 @@ include("updatedcluster.jl")
 
 include("step.jl")
 
+include("LifePattern.jl")
+
 include("LifePatterns.jl")
 
 

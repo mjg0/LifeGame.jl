@@ -160,9 +160,7 @@ end
 
 
 # Implement AbstractArray interface for LifeGrid
-Base.size(lg::LifeGrid) = lg.height, lg.width
-
-function indexlifegrid(::LifeGrid{R, C, H}, i, j) where {R, C, H}
+Base.@propagate_inbounds @inline function indexlifegrid(::LifeGrid{R, C, H}, i, j) where {R, C, H}
     I = i+1 # skip padding column
     J = (j-1)÷(nbits(C)-2)+2
     shift = (j-1)%(nbits(C)-2)+1
@@ -170,11 +168,27 @@ function indexlifegrid(::LifeGrid{R, C, H}, i, j) where {R, C, H}
     return I, J, shift
 end
 
+Base.@propagate_inbounds @inline function indexhalos(lg::LifeGrid{R, C, H}, i::Integer, j::Integer) where {R, C, H}
+    I, J, _ = indexlifegrid(lg, i, j)
+
+    # The index in the halo buffer array
+    hidx = CartesianIndex((I-2)÷nbits(H)+1, J)
+
+    # A single-bit mask with the appropriate shift
+    k = (I-2)%nbits(H)+1
+    mask = one(H) << (nbits(H)-k)
+
+    return hidx, mask
+end
+
+Base.size(lg::LifeGrid) = lg.height, lg.width
+
 Base.@propagate_inbounds function Base.getindex(lg::LifeGrid{R,C,H}, i::Integer, j::Integer) where {R,C,H}
     I, J, shift = indexlifegrid(lg, i, j)
 
     return ((lg.grid[I,J] << shift) & highbit(C)) == highbit(C)
 end
+
 
 Base.@propagate_inbounds function
 Base.setindex!(lg::LifeGrid{R, C, H}, val::Number, i::Integer, j::Integer) where {R, C, H}
@@ -188,9 +202,7 @@ Base.setindex!(lg::LifeGrid{R, C, H}, val::Number, i::Integer, j::Integer) where
                            cluster & ~cellmask)
 
     # Which halo needs to be updated?
-    hidx = CartesianIndex((I-2)÷nbits(H)+1, J)
-    k = (I-2)%nbits(H)+1
-    hmask = one(H) << (nbits(H)-k)
+    hidx, hmask = indexhalos(lg, i, j)
     halos = shift == 1 ? lg.lefthalos[1] : lg.righthalos[1]
 
     # Update the halo if necessary
