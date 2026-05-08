@@ -5,13 +5,20 @@ include("SlowLifeGrid.jl")
 
 
 # Print what went wrong when a LifeGrid was updated incorrectly
-function printlifediff(left, correct, actual; label1="Previous", label2="Computed")
+function printlifediff(left, correct, actual; leftlabel)
+    # Basic information
+    m, n = size(correct)
+    x, y = Tuple(findfirst(correct .!= actual))
+    println("Failure with $m×$n grid, first difference at cell ($x, $y)")
+
+    # Short-circuit if the grid is too big
+    if max(size(correct)...) > 20 return end
+
     # Header
-    m, n = size(actual)
     println("Incorrect result (bad cells in red):")
     printedwidth = 2*size(left, 2)+4
-    print(  label1, repeat(' ', max(0, printedwidth-length(label1))))
-    println(label2, repeat(' ', max(0, printedwidth-length(label2))))
+    print(  leftlabel, repeat(' ', max(0, printedwidth-length(label1))))
+    println("Correct", repeat(' ', max(0, printedwidth-length(label2))))
 
     # Representation of whether the cell is on or off
     rep(onoroff) = onoroff ? "* " : "- "
@@ -40,7 +47,7 @@ end
 
 
 # step! LifeGrid a few times 
-function teststep!(rule, size; verbose=false, CType=nothing)
+function teststep!(rule, size; CType=nothing)
     m, n = size
     @testset failfast=true "rule $rule, size $m×$n" begin
         for parallel in (false, true)
@@ -63,11 +70,8 @@ function teststep!(rule, size; verbose=false, CType=nothing)
                 step!(lg; parallel=parallel)
                 gridequal = all(slow .== lg)
                 if !gridequal
-                    println("Failed for rule $rule, size $m×$n")
-                    println("First different index: $(findfirst(==(false), slow .== lg))")
-                    if verbose
-                        printlifediff(prev, slow, lg)
-                    end
+                    println("Failed with rule $rule")
+                    printlifediff(prev, slow, lg; leftlabel="Previous")
                 end
                 @test gridequal
             end
@@ -99,7 +103,7 @@ end
 
     @testset "LifeGrid indexing" begin
         lg = LifeGrid(5, 200)
-        # Check indexing in several cases, espcially at borders between clusters
+        # Check indexing in several cases, especially at borders between clusters
         for (i, j, I, J, value) in ((1, 1,   1, 1, one(UInt64)  << 62),
                                     (2, 2,   2, 1, one(UInt64)  << 61),
                                     (3, 62,  3, 1, one(UInt64)  << 1 ),
@@ -133,29 +137,35 @@ end
             pattern[I] = !pattern[I]
             lp[I] = !lp[I]
             identical = all(lp .== pattern)
-            if !identical && max(M, N)<20
-                printlifediff(pattern, pattern, lp; label1="Correct", label2="Actual")
+            if !identical
+                printlifediff(pattern, pattern, lp; leftlabel="Correct")
             end
             @test identical
 
             # Insertion
             i = rand(rng, 1:lastindex(lg, 1)-M)
             j = rand(rng, 1:lastindex(lg, 2)-N)
-            lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
-            lgwithp2 = insert!(deepcopy(lg), i, j, lp)
-            identical = all(lgwithp1 .== lgwithp2)
-            if !identical
-                println("$M×$N")
-                if max(M, N)<20
-                    printlifediff(lgwithp1, lgwithp1, lgwithp2; label1="Correct", label2="Actual")
+            correct = Array(lg)
+            for lpI in CartesianIndices(lp)
+                I = lpI+CartesianIndex((i, j))-oneunit(lpI)
+                if lp[lpI]
+                    correct[I] = true
                 end
             end
+            lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
+            lgwithp2 = insert!(deepcopy(lg), i, j, lp)
+            identical = all(correct .== lgwithp2) # .== lgwithp1)
+            if !identical
+                printlifediff(lgwithp1, lgwithp1, lgwithp2; leftlabel="Correct")
+            end
             @test identical
+
+            # TODO: this is just testing that insert! is identical in both cases
             for (gI, pI) in zip(CartesianIndex((i, j)):CartesianIndex((i+M-1, j+N-1)),
                                 CartesianIndices(pattern))
                 correct = lgwithp1[gI] == lgwithp1[gI] || lp[pI]
                 if !correct
-                    printlifediff(lgwithp1, lgwithp1, lgwithp2; label1="Correct", label2="Actual")
+                    printlifediff(lgwithp1, lgwithp1, lgwithp2; leftlabel="Correct")
                 end
             end
         end
@@ -249,19 +259,14 @@ end
     end
 
     @testset "step!" begin
-        # A few small grid tests with verbose output on failure
-        for rule in ("B3/S23", "B2/S", "B35678/S5678")
-            for size in ((3, 4), (8, 6), (9, 7))
-                teststep!(rule, size; verbose=true, CType=UInt8)
-            end
-        end
+        rng = MersenneTwister(1)
+        CTypes = (UInt8, UInt16, UInt32, UInt64)
+        rules = ("B3/S23", "B2/S", "B35678/S5678", "B36/S23", "B234/S", "B345/S5")
 
         # Numerous tests of grids of size close to the edge of clusters and chunks
-        for rule in ("B36/S23", "B234/S", "B345/S5")
-            for height in (8, 40, 64, 65, 128, 129, 150, 300)
-                for width in (6, 45, 62, 63, 90, 124, 125, 200, 400)
-                    teststep!(rule, (height, width); verbose=false)
-                end
+        for height in (3, 7, 8, 9, 40, 64, 65, 128, 129, 150, 300)
+            for width in (6, 7, 14, 15, 45, 62, 63, 90, 124, 125, 200, 400)
+                teststep!(rand(rng, rules), (height, width); CType=rand(rng, CTypes))
             end
         end
    end

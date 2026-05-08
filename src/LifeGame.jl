@@ -67,7 +67,7 @@ module LifeGame
 
 
 
-using Polyester, SparseArrays
+using Polyester
 
 
 

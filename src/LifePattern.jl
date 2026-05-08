@@ -57,42 +57,33 @@ end
 
 
 
+Base.@propagate_inbounds @inline function bitchunk(lp::LifePattern, i, jrange, ::Type{C}) where {C<:Unsigned}
+    data = lp.data
+    P = eltype(data)
 
+    # How many bits along are we?
+    bit1 = (i-1)*lp.width+first(jrange)
+    bit2 = (i-1)*lp.width+last( jrange)
 
-#Base.@propagate_inbounds @inline function bitchunk(lp::LifePattern, i, jrange, ::Type{C}) where C
-#    # TODO: @checkinbounds if jrange is small enough to fit in C
-#    # TODO: assert nbits(C)≤nbits(UInt64)
-#
-#    # Which bits in the lp.data vector are we working with?
-#    bitrange = (i-1)*lp.width.+jrange
-#
-#    # Convenience array to see the data as type C
-#    data = reinterpret(C, lp.data)
-#
-#    # Which indices in data we're working with
-#    I1 = first(bitrange)÷nbits(C)+1
-#    I2 = last( bitrange)÷nbits(C)+1
-#
-#    # How many bits to drop from the front of data[I1]
-#    shift = (first(bitrange)-1)%nbits(C)
-#
-#    # Get all the bits from data[I1:I2] into one C
-#    println(data[I1]|>bitstring)
-#    x = ifelse(I1==I2, # This necessitates the extra cell in lp.data
-#               data[I1]<<shift,
-#               data[I1]<<shift | data[I2]>>(nbits(C)-shift))
-#
-#    # Mask off the trailing bits
-#    k = clamp(last(bitrange)-first(bitrange)+1, 0, nbits(C))
-#    mask = ifelse(k==0,
-#                  zero(C),
-#                  typemax(C)<<(nbits(C)-k))
-#
-#    println(I1:I2)
-#    println(bitrange, ' ', shift, ' ', bitstring(x), ' ', bitstring(mask), ' ', bitstring(x&mask))
-#    return x & mask
-#end
+    # How many elements along are we?
+    I1 = (bit1-1)÷nbits(P)+1
+    I2 = (bit2-1)÷nbits(P)+1
+    shift = (bit1-1)%nbits(P)
 
+    # Get all the bits from data[I1:I2] into one P
+    x = ifelse(I1==I2,
+               data[I1]<<shift,
+               (data[I1]<<shift) | (data[I2]>>(nbits(P)-shift)))
+
+    # Mask to take off trailing bits
+    k = min(bit2-bit1+1, nbits(C))
+    mask = ifelse(k==0,
+                  zero(P),
+                  typemax(P)<<(nbits(P)-k))
+
+    # Return a C, shifted over the appropriate amount
+    return C((x & mask) >> (nbits(P)-nbits(C)))
+end
 
 
 
@@ -100,7 +91,7 @@ end
 function Base.insert!(lg::LifeGrid, i::Integer, j::Integer, pattern::AbstractMatrix{<:Number})
     for pI in CartesianIndices(pattern)
         I = pI+CartesianIndex(i, j)-oneunit(pI)
-        lg[I] = ifelse(pattern[pI]==zero(eltype(pI)),
+        lg[I] = ifelse(pattern[pI]==zero(eltype(pattern)),
                        lg[I],
                        true)
     end
@@ -108,47 +99,45 @@ function Base.insert!(lg::LifeGrid, i::Integer, j::Integer, pattern::AbstractMat
     return lg
 end
 
-# Use this if each LifePattern row is padded to a UInt64 boundary.
-@inline bitstride(lp::LifePattern) = nbits(UInt64) * cld(lp.width, nbits(UInt64))
+function Base.insert!(lg::LifeGrid{R, C, H}, i::Integer, j::Integer, lp::LifePattern) where {R, C, H}
+    # TODO: @checkbounds
 
-Base.@propagate_inbounds @inline function bitchunk(
-    lp::LifePattern,
-    i,
-    jrange,
-    ::Type{C},
-) where {C<:Unsigned}
-    Cbits = nbits(C)
-    Wbits = nbits(UInt64)
+    # Bounds within lg
+    I1, J1, lshift = indexlifegrid(lg, i, j)
+    I2, J2, rshift = indexlifegrid(lg, ((i, j).+size(lp).-1)...)
 
-    k = last(jrange) - first(jrange) + 1
-    k = clamp(k, 0, Cbits)
-    k == 0 && return zero(C)
+    # Keep track of which column in lp we're on
+    pbit = 1
 
-    # Logical bit indices, 1-based, MSB-first within each UInt64.
-    #
-    # If your LifePattern rows are packed back-to-back with no row padding,
-    # replace `bitstride(lp)` with `lp.width`.
-    bit1 = (i - 1) * bitstride(lp) + first(jrange)
+    # Iterate over cells in lg
+    for J in J1:J2
+        # Where we are, in both lg and lp
+        loffset = ifelse(J==J1, lshift, 1)
+        roffset = ifelse(J==J2, rshift, nbits(C)-2)
+        pJ = pbit:ifelse(J==J2, lastindex(lp, 2), pbit+roffset-loffset)
 
-    w0, r = divrem(bit1 - 1, Wbits)
-    w = w0 + 1
+        # Iterate this row
+        for (I, pI) in zip(I1:I2, axes(lp, 1))
+            # Update the grid element
+            overlay = bitchunk(lp, pI, pJ, C) >> loffset
+            lg.grid[I, J] |= overlay
 
-    # Pull up to 64 logical MSB-first bits into the top of x64.
-    @inbounds x64 = lp.data[w] << r
+            # Update halos if needed
+            hi = i+pI-1
+            hj = j+first(pJ)-1
+            if (highbit(C)>>1)&overlay != zero(C)
+                hidx, hmask = indexhalos(lg, hi, hj)
+                lg.lefthalos[1][hidx] |= hmask
+            end
+            if (lowbit(C)<<1)&overlay != zero(C)
+                hidx, hmask = indexhalos(lg, hi, hj)
+                lg.righthalos[1][hidx] |= hmask
+            end
+        end
 
-    if r != 0
-        @inbounds x64 |= lp.data[w + 1] >> (Wbits - r)
+        # Update lp bit start column
+        pbit = last(pJ)+1
     end
 
-    # Project the high Cbits into C.
-    x = if Cbits == Wbits
-        C(x64)
-    else
-        C(x64 >> (Wbits - Cbits))
-    end
-
-    # Keep only the requested logical bits, left-aligned.
-    mask = typemax(C) << (Cbits - k)
-
-    return x & mask
+    return lg
 end
