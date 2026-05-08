@@ -5,22 +5,21 @@ include("SlowLifeGrid.jl")
 
 
 # Print what went wrong when a LifeGrid was updated incorrectly
-function printlifediff(previous, correct, actual)
+function printlifediff(left, correct, actual; label1="Previous", label2="Computed")
     # Header
     m, n = size(actual)
-    println("Incorrect result for $m×$n $(rule(actual)) grid")
-    println("Bad cells are printed in red")
-    printedwidth = 2*size(previous, 2)+4
-    print(  "Previous", repeat(' ', max(0, printedwidth-8)))
-    println("Computed", repeat(' ', max(0, printedwidth-8)))
+    println("Incorrect result (bad cells in red):")
+    printedwidth = 2*size(left, 2)+4
+    print(  label1, repeat(' ', max(0, printedwidth-length(label1))))
+    println(label2, repeat(' ', max(0, printedwidth-length(label2))))
 
     # Representation of whether the cell is on or off
     rep(onoroff) = onoroff ? "* " : "- "
 
     for i in axes(correct, 1)
-        # Print the previous grid
+        # Print the left grid
         for j in axes(correct, 2)
-            print(rep(previous[i,j]))
+            print(rep(left[i,j]))
         end
         print("    ")
 
@@ -118,21 +117,51 @@ end
         end
     end
 
-    #@testset "LifePattern indexing" begin
-    #    pat = LifePattern([0 1 0
-    #                       0 0 1
-    #                       1 1 1])
-    #    # Test a few places, especially the beginning and end of the pattern
-    #    @test pat[1,1] == false
-    #    @test pat[1,2] == true
-    #    @test pat[3,2] == true
-    #    # Flip a few values, both with a bool and with a number
-    #    pat[3,3] = false
-    #    pat[2,1] = 1
-    #    # Test that the swaps are reflected by getindex
-    #    @test pat[3,3] == false
-    #    @test pat[2,3] == true
-    #end
+    @testset failfast=true "LifePattern" begin
+        rng = MersenneTwister(1)
+        lg = LifeGrid(rand(rng, Bool, 1000, 1000))
+
+        # Test many different sizes
+        inds = Int.(round.(2 .^(2:1.3:9)))
+        for M in inds, N in inds
+            # Construction
+            pattern = rand(rng, Bool, M, N)
+            lp = LifePattern(pattern)
+
+            # Indexing
+            I = rand(rng, CartesianIndices(pattern))
+            pattern[I] = !pattern[I]
+            lp[I] = !lp[I]
+            identical = all(lp .== pattern)
+            if !identical && max(M, N)<20
+                printlifediff(pattern, pattern, lp; label1="Correct", label2="Actual")
+            end
+            @test identical
+
+            # Insertion
+            i = rand(rng, 1:lastindex(lg, 1)-M)
+            j = rand(rng, 1:lastindex(lg, 2)-N)
+            lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
+            lgwithp2 = insert!(deepcopy(lg), i, j, lp)
+            identical = all(lgwithp1 .== lgwithp2)
+            if !identical
+                println("$M×$N")
+                if max(M, N)<20
+                    printlifediff(lgwithp1, lgwithp1, lgwithp2; label1="Correct", label2="Actual")
+                end
+            end
+            @test identical
+            for (gI, pI) in zip(CartesianIndex((i, j)):CartesianIndex((i+M-1, j+N-1)),
+                                CartesianIndices(pattern))
+                correct = lgwithp1[gI] == lgwithp1[gI] || lp[pI]
+                if !correct
+                    printlifediff(lgwithp1, lgwithp1, lgwithp2; label1="Correct", label2="Actual")
+                end
+            end
+        end
+    end
+
+
 
     @testset "updatedcluster" begin
         # Test with some fixed values that have been calculated by hand
