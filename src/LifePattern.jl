@@ -190,13 +190,12 @@ Base.@propagate_inbounds function Base.insert!(
             # Update halos if needed
             hi = i+pI-1
             hj = j+first(pJ)-1
+            hidx, hmask = indexhalos(lg, hi, hj)
             if (highbit(C)>>1)&overlay != zero(C)
-                hidx, hmask = indexhalos(lg, hi, hj)
-                lg.lefthalos[1][hidx] |= hmask
+                lg.halos.currentleft[hidx] |= hmask
             end
             if (lowbit(C)<<1)&overlay != zero(C)
-                hidx, hmask = indexhalos(lg, hi, hj)
-                lg.righthalos[1][hidx] |= hmask
+                lg.halos.currentright[hidx] |= hmask
             end
         end
 

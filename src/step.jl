@@ -8,28 +8,31 @@ export step!
 Return the outgoing left and right halo cells of `chunk` as packed bits in two `H`s.
 
 The second bit in the first element of `chunk` goes into the top bit of the left halo, the
-second bit of the next element into the second from the top bit, etc. Likewise, the second
-from the last bit in the first element of `chunk` goes into the top bit of the right halo,
-etc. `chunk` must thus be of length `8*sizeof(H)`.
+second bit of the next element into the second bit, etc. Likewise, the second from the last
+bit in the first element of `chunk` goes into the top bit of the right halo, etc. `chunk`
+must thus be of length `8*sizeof(H)`.
 """
 Base.@propagate_inbounds @inline function updatedchunkhalos(
     chunk::AbstractVector{C},
     ::Type{H},
 ) where {C,H}
-    lshift = nbits(C) - 2
-    rshift = 1
+    @boundscheck if length(chunk) != nbits(H)
+        throw(ArgumentError("chunk must be of length 8*sizeof($H)"))
+    end
 
     lhalo = zero(H)
     rhalo = zero(H)
 
     for k = 1:nbits(H)
-        # Get this cluster's halos, shifted into the kth bit
-        lmask = H((chunk[k] >> lshift) & one(C)) << (nbits(H) - k)
-        rmask = H((chunk[k] >> rshift) & one(C)) << (nbits(H) - k)
+        # Get this cluster's halos
+        lshift = nbits(C) - 2
+        rshift = 1
+        lbit = H((chunk[k] >> lshift) & one(C))
+        rbit = H((chunk[k] >> rshift) & one(C))
 
-        # Update lhalo and rhalo
-        lhalo |= lmask
-        rhalo |= rmask
+        # Update lhalo and rhalo at this iteration's bit
+        lhalo |= lbit << (nbits(H) - k)
+        rhalo |= rbit << (nbits(H) - k)
     end
 
     return lhalo, rhalo
@@ -42,6 +45,10 @@ end
 
 Advance `lg` by one generation in place and return it.
 
+There are 3 sets of matrices involved in updating `lg`:
+
+1. `lg.data`:
+
 Each column is split into chunks of length equal to the number of bits in the halos.
 Boundaries are special cases, but the rest of the update descends through each column thus:
 
@@ -50,26 +57,23 @@ Boundaries are special cases, but the rest of the update descends through each c
 1. The newly updated chunk's halo bits are extracted for future iterations
 """
 function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
-    Cbits = 8 * sizeof(C)
-    Hbits = 8 * sizeof(H)
-
     grid = lg.grid
 
     J1 = firstindex(lg.grid, 2) + 1
     J2 = lastindex(lg.grid, 2) - 1
 
-    bufflen = Hbits + 2
+    bufflen = nbits(H) + 2
 
-    endshift = mod(-size(lg, 2), Cbits - 2) + 1
+    endshift = mod(-size(lg, 2), nbits(C) - 2) + 1
 
     @inbounds @batch for J = J1:J2
-        current = lg.colbuffers1[Threads.threadid()]
-        next = lg.colbuffers2[Threads.threadid()]
+        current = lg.buffers.a[Threads.threadid()]
+        next = lg.buffers.b[Threads.threadid()]
 
-        inhalosleft = view(lg.righthalos[1], :, J - 1)
-        inhalosright = view(lg.lefthalos[1], :, J + 1)
-        outhalosleft = view(lg.lefthalos[2], :, J)
-        outhalosright = view(lg.righthalos[2], :, J)
+        inhalosleft = view(lg.halos.currentright, :, J - 1)
+        inhalosright = view(lg.halos.currentleft, :, J + 1)
+        outhalosleft = view(lg.halos.nextleft, :, J)
+        outhalosright = view(lg.halos.nextright, :, J)
 
         above = zero(C)
         updatehalos!(current, gridchunk(lg, 1, J), inhalosleft[1], inhalosright[1])
@@ -112,8 +116,9 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
         outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
     end
 
-    lg.lefthalos[1], lg.lefthalos[2] = lg.lefthalos[2], lg.lefthalos[1]
-    lg.righthalos[1], lg.righthalos[2] = lg.righthalos[2], lg.righthalos[1]
+    # Swap halos
+    lg.halos.currentleft, lg.halos.nextleft = lg.halos.nextleft, lg.halos.currentleft
+    lg.halos.currentright, lg.halos.nextright = lg.halos.nextright, lg.halos.currentright
 
     return lg
 end

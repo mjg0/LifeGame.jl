@@ -76,9 +76,41 @@ end
 
 
 
-# Function to convert a number of bits to an unsigned integer that will contain them
-smallestuint(N) =
-    if N ≤ 8
+# Types to store a LifeGrid's halo matrices and grid chunk buffers
+"""
+    Halos{H}
+
+A type to store the halos between the columns of a `LifeGrid`'s `grid`.
+"""
+mutable struct Halos{H}
+    currentleft::Matrix{H}
+    nextleft::Matrix{H}
+    currentright::Matrix{H}
+    nextright::Matrix{H}
+
+    Halos(H, m, n) = new{H}(ntuple(_ -> zeros(H, m, n), 4)...)
+end
+
+struct Buffers{C}
+    # Inner vectors store a chunk's worth of cells; there are Threads.nthreads() of each
+    a::Vector{Vector{C}}
+    b::Vector{Vector{C}}
+
+    function Buffers(C::Type, H::Type)
+        buffers = ([zeros(C, nbits(H) + 2) for _ in 1:Threads.nthreads()] for _ in 1:2)
+        return new{C}(buffers...)
+    end
+end
+
+
+
+"""
+    smallestuint(N)
+
+Return the smallest `Unsigned` type that has at least `min(N, 64)` bits.
+"""
+function smallestuint(N)
+    return if N ≤ 8
         UInt8
     elseif N ≤ 16
         UInt16
@@ -87,6 +119,7 @@ smallestuint(N) =
     else
         UInt64
     end
+end
 
 
 
@@ -119,16 +152,14 @@ Return an m×n `LifeGrid` with no living cells and rule `rule`.
 
 Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 
-True and non-zero values indicate living cells; false and zero values indicate dead cells.
+True or non-zero values indicate living cells; false or zero values indicate dead cells.
 """
 struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
     height::Int64
     width::Int64
     grid::Matrix{CType}
-    colbuffers1::Vector{Vector{CType}}
-    colbuffers2::Vector{Vector{CType}}
-    lefthalos::Vector{Matrix{HType}}
-    righthalos::Vector{Matrix{HType}}
+    halos::Halos{HType}
+    buffers::Buffers{CType}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(
@@ -138,23 +169,20 @@ struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
         CType::Type{<:Unsigned}=smallestuint(n + 2),
         HType::Type{<:Unsigned}=smallestuint(m),
     )
-        cellspercluster = nbits(CType) - 2
+        # Halos
+        haloheight = cld(m, nbits(HType))
+        halowidth = cld(n, nbits(CType) - 2) + 2
+        halos = Halos(HType, haloheight, halowidth)
 
         # Buffers
-        bufferheight = cld(m, nbits(HType))
-        bufferwidth = cld(n, cellspercluster) + 2
-        halos = ntuple(_ -> zeros(HType, bufferheight, bufferwidth), 4)
-        colbuffers =
-            ntuple(_ -> [zeros(CType, nbits(HType) + 2) for _ = 1:Threads.nthreads()], 2)
-        halos = ntuple(_ -> [zeros(HType, bufferheight, bufferwidth) for _ = 1:2], 2)
+        buffers = Buffers(CType, HType)
 
-        # Grid
-        gridheight = nbits(HType) * bufferheight + 2
-        gridwidth = bufferwidth
+        # Clusters
+        gridheight = nbits(HType) * haloheight + 2 # store extra rows for even chunk sizes
+        gridwidth = halowidth
         grid = zeros(CType, gridheight, gridwidth)
 
-        # Return the LifeGrid
-        return new{LifeRule(rule),CType,HType}(m, n, grid, colbuffers..., halos...)
+        return new{LifeRule(rule),CType,HType}(m, n, grid, halos, buffers)
     end
 
     function LifeGrid(grid::AbstractMatrix{T}; kw...) where {T<:Number}
@@ -166,7 +194,21 @@ end
 
 
 
-# AbstractArray interface for LifeGrid
+"""
+    indexlifegrid(lg::LifeGrid, i, j)
+
+Return the coordinates and a shift translating index `(i, j)` to a cell in `lg.grid`.
+
+Coordinates are two indices and the shift is a number up to `8*sizeof(eltype(lg.grid))`.
+
+For coordinates and shift obtained thus:
+
+```julia
+I, J, shift = indexlifegrid(lg, i, j)
+```
+
+...`lg[i,j]` is true only if `(lg.grid[I,J] << shift` has its highest bit on.
+"""
 Base.@propagate_inbounds @inline function indexlifegrid(
     ::LifeGrid{R,C,H},
     i,
@@ -179,6 +221,9 @@ Base.@propagate_inbounds @inline function indexlifegrid(
     return I, J, shift
 end
 
+
+
+# AbstractArray interface for LifeGrid
 Base.size(lg::LifeGrid) = lg.height, lg.width
 
 Base.@propagate_inbounds function Base.getindex(
@@ -190,7 +235,6 @@ Base.@propagate_inbounds function Base.getindex(
 
     return ((lg.grid[I, J] << shift) & highbit(C)) == highbit(C)
 end
-
 
 Base.@propagate_inbounds function Base.setindex!(
     lg::LifeGrid{R,C,H},
@@ -207,10 +251,10 @@ Base.@propagate_inbounds function Base.setindex!(
 
     # Which halo needs to be updated?
     hidx, hmask = indexhalos(lg, i, j)
-    halos = shift == 1 ? lg.lefthalos[1] : lg.righthalos[1]
+    halos = shift == 1 ? lg.halos.currentleft : lg.halos.currentright
 
     # Update the halo if necessary
-    op = val != zero(val) ? x -> x | hmask : x -> x & ~hmask
+    op = ifelse(val != zero(val), x -> x | hmask, x -> x & ~hmask)
     if shift == 1
         halos[hidx] = op(halos[hidx])
     elseif shift == nbits(C) - 2
@@ -279,7 +323,7 @@ Base.@propagate_inbounds @inline function indexhalos(
 ) where {R,C,H}
     I, J, _ = indexlifegrid(lg, i, j)
 
-    # The index in the halo buffer array
+    # The index in the halo array
     hidx = CartesianIndex((I - 2) ÷ nbits(H) + 1, J)
 
     # A single-bit mask with the appropriate shift

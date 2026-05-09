@@ -258,8 +258,8 @@ end
                 0b00100110 0b00000000
             ],
         )
-        @test all(lg.lefthalos[1][2:3] .== [0b00010000, 0b01010000])
-        @test all(lg.righthalos[1][2:3] .== [0b10101000, 0b00000000])
+        @test all(lg.halos.currentleft[2:3] .== [0b00010000, 0b01010000])
+        @test all(lg.halos.currentright[2:3] .== [0b10101000, 0b00000000])
     end
 
     @testset "step!" begin
