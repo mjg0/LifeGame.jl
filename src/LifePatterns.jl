@@ -40,15 +40,13 @@ macro pattern(name, pattern)
     P = Bool.(Core.eval(__module__, :($pattern .!= 0)))
 
     # Turn a literal matrix back into an Expr
-    matrixexpr(x) = Expr(:vcat, [
-        Expr(:row, [x[i, j] for j in axes(x, 2)]...)
-        for i in axes(x, 1)
-    ]...)
+    matrixexpr(x) =
+        Expr(:vcat, [Expr(:row, [x[i, j] for j in axes(x, 2)]...) for i in axes(x, 1)]...)
 
     # Find all unique rotation/reflection combos
     patterns = Matrix{Bool}[]
     for rotation in (x->x, rotl90, rot180, rotr90)
-        for reflection in (x->x, x->reverse(x; dims=2))
+        for reflection in (x->x, x->reverse(x; dims = 2))
             transformed = reflection(rotation(P))
             if transformed ∉ patterns
                 push!(patterns, transformed)
@@ -57,13 +55,12 @@ macro pattern(name, pattern)
     end
 
     # Create and return the list of consts
+    constpattern(sym, matrix) =
+        :(const $sym = LifePattern($(matrixexpr(matrix)); mutable = false))
     defs = if length(patterns) == 1
-        [:(const $(Symbol(name))    = LifePattern($(matrixexpr(first(patterns)));
-                                                  mutable=false))]
+        [constpattern(Symbol(name), first(patterns))]
     else
-        [:(const $(Symbol(name, k)) = LifePattern($(matrixexpr(p));
-                                                  mutable=false))
-         for (k, p) in enumerate(patterns)]
+        [constpattern(Symbol(name, k), patterns[k]) for k in eachindex(patterns)]
     end
     return esc(Expr(:block, defs...))
 end
@@ -71,63 +68,79 @@ end
 
 
 # Patterns
-@pattern block          [1 1
-                         1 1]
+@pattern block [
+    1 1
+    1 1
+]
 
-@pattern beehive        [0 1 1 0
-                         1 0 0 1
-                         0 1 1 0]
+@pattern beehive [
+    0 1 1 0
+    1 0 0 1
+    0 1 1 0
+]
 
-@pattern blinker        [0 1 0
-                         0 1 0
-                         0 1 0]
+@pattern blinker [
+    0 1 0
+    0 1 0
+    0 1 0
+]
 
-@pattern toad           [0 0 0 0
-                         0 1 1 1
-                         1 1 1 0
-                         0 0 0 0]
+@pattern toad [
+    0 0 0 0
+    0 1 1 1
+    1 1 1 0
+    0 0 0 0
+]
 
-@pattern beacon         [1 1 0 0
-                         1 1 0 0
-                         0 0 1 1
-                         0 0 1 1]
+@pattern beacon [
+    1 1 0 0
+    1 1 0 0
+    0 0 1 1
+    0 0 1 1
+]
 
-@pattern pulsar         [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-                         0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
-                         0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-                         0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
-                         0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
-                         0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
-                         0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
-                         0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-                         0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
-                         0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
-                         0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
-                         0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
-                         0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-                         0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
-                         0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+@pattern pulsar [
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
+    0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
+    0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
+    0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
+    0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
+    0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
+    0 1 0 0 0 0 1 0 1 0 0 0 0 1 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 1 1 1 0 0 0 1 1 1 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+]
 
-@pattern pentadecathlon [0 0 0 0 0 0 0 0 0
-                         0 0 0 0 0 0 0 0 0
-                         0 0 0 0 0 0 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 1 0 1 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 1 0 1 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 0 1 0 0 0 0
-                         0 0 0 0 0 0 0 0 0
-                         0 0 0 0 0 0 0 0 0
-                         0 0 0 0 0 0 0 0 0]
+@pattern pentadecathlon [
+    0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 1 0 1 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 1 0 1 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 0 1 0 0 0 0
+    0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0
+]
 
-@pattern glider         [0 1 0
-                         0 0 1
-                         1 1 1]
+@pattern glider [
+    0 1 0
+    0 0 1
+    1 1 1
+]
 
 
 

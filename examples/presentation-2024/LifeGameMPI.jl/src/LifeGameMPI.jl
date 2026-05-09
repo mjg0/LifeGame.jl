@@ -10,13 +10,13 @@ export LifeGridMPI, step!
 function slicewidth(width, N, n=0)
     gridwidth = cld(width, LifeGame.CELLS_PER_CLUSTER)
     subwidth = cld(gridwidth, N) * LifeGame.CELLS_PER_CLUSTER
-    return min((n+1)*subwidth, width) - n*subwidth
+    return min((n + 1) * subwidth, width) - n * subwidth
 end
 
 
 
 function sliceindex(width, N, j)
-    return divrem(j-1, slicewidth(width, N)).+(0, 1) # Add 1 for 1-based j index
+    return divrem(j - 1, slicewidth(width, N)) .+ (0, 1) # Add 1 for 1-based j index
 end
 
 
@@ -26,8 +26,8 @@ struct LifeGridMPI <: AbstractMatrix{Bool}
     width::Int64
     commsize::Int64
     commrank::Int64
-    leftsendbuf ::MPI.Buffer # MPI buffer
-    leftrecvbuf ::MPI.Buffer # MPI buffer
+    leftsendbuf::MPI.Buffer # MPI buffer
+    leftrecvbuf::MPI.Buffer # MPI buffer
     rightsendbuf::MPI.Buffer # MPI buffer
     rightrecvbuf::MPI.Buffer # MPI buffer
     halorequests::MPI.MultiRequest # Halo exchange async requests
@@ -44,15 +44,24 @@ struct LifeGridMPI <: AbstractMatrix{Bool}
 
         lg = LifeGrid(m, thisrankwidth)
 
-        leftsendbuf  = MPI.Buffer(@view lg.grid[:,begin+1])
-        leftrecvbuf  = MPI.Buffer(@view lg.grid[:,begin])
-        rightsendbuf = MPI.Buffer(@view lg.grid[:,begin+1])
-        rightrecvbuf = MPI.Buffer(@view lg.grid[:,begin])
+        leftsendbuf = MPI.Buffer(@view lg.grid[:, begin+1])
+        leftrecvbuf = MPI.Buffer(@view lg.grid[:, begin])
+        rightsendbuf = MPI.Buffer(@view lg.grid[:, begin+1])
+        rightrecvbuf = MPI.Buffer(@view lg.grid[:, begin])
 
         halorequests = MPI.MultiRequest(4)
 
-        return new(lg, n, commsize, commrank,
-                   leftsendbuf, leftrecvbuf, rightsendbuf, rightrecvbuf, halorequests)
+        return new(
+            lg,
+            n,
+            commsize,
+            commrank,
+            leftsendbuf,
+            leftrecvbuf,
+            rightsendbuf,
+            rightrecvbuf,
+            halorequests,
+        )
     end
 
     function LifeGridMPI(grid::Union{BitMatrix,AbstractMatrix{Bool}})
@@ -60,7 +69,7 @@ struct LifeGridMPI <: AbstractMatrix{Bool}
         lg .= grid
     end
 
-    LifeGridMPI(grid::AbstractMatrix{<:Number}) = LifeGridMPI(grid.!=0)
+    LifeGridMPI(grid::AbstractMatrix{<:Number}) = LifeGridMPI(grid .!= 0)
 end
 
 
@@ -73,17 +82,21 @@ end
 Base.@propagate_inbounds function Base.getindex(lg::LifeGridMPI, i::Integer, j::Integer)
     process, jdx = sliceindex(lg.width, lg.commsize, j)
     jdx = min(jdx, size(lg.lifegrid, 2))
-    value = lg.lifegrid[i,jdx] # dummy for all but `process`
+    value = lg.lifegrid[i, jdx] # dummy for all but `process`
     return MPI.Bcast(value, process, MPI.COMM_WORLD)
 end
 
-Base.@propagate_inbounds function Base.setindex!(lg::LifeGridMPI, value,
-                                                 i::Integer, j::Integer)
+Base.@propagate_inbounds function Base.setindex!(
+    lg::LifeGridMPI,
+    value,
+    i::Integer,
+    j::Integer,
+)
     process, jdx = sliceindex(lg.width, lg.commsize, j)
     if process == lg.commrank
-        lg.lifegrid[i,jdx] = value
+        lg.lifegrid[i, jdx] = value
     end
-    @boundscheck if process >= lg.commsize
+    @boundscheck if process ≥ lg.commsize
         BoundsError(lg, (i, j))
     end
     return value
@@ -95,12 +108,18 @@ function step!(lg::LifeGridMPI; kw...)
     # Exchange halos before running the update
     reqs = lg.halorequests
     @inbounds if lg.commrank > 0             # Left halo
-        MPI.Isend( lg.leftsendbuf,  MPI.COMM_WORLD, reqs[1]; dest  =lg.commrank-1, tag=0)
-        MPI.Irecv!(lg.leftrecvbuf,  MPI.COMM_WORLD, reqs[2]; source=lg.commrank-1, tag=1)
+        MPI.Isend(lg.leftsendbuf, MPI.COMM_WORLD, reqs[1]; dest=lg.commrank - 1, tag=0)
+        MPI.Irecv!(lg.leftrecvbuf, MPI.COMM_WORLD, reqs[2]; source=lg.commrank - 1, tag=1)
     end
-    @inbounds if lg.commrank < lg.commsize-1 # Right halo
-        MPI.Isend( lg.rightsendbuf, MPI.COMM_WORLD, reqs[3]; dest  =lg.commrank+1, tag=1)
-        MPI.Irecv!(lg.rightrecvbuf, MPI.COMM_WORLD, reqs[4]; source=lg.commrank+1, tag=0)
+    @inbounds if lg.commrank < lg.commsize - 1 # Right halo
+        MPI.Isend(lg.rightsendbuf, MPI.COMM_WORLD, reqs[3]; dest=lg.commrank + 1, tag=1)
+        MPI.Irecv!(
+            lg.rightrecvbuf,
+            MPI.COMM_WORLD,
+            reqs[4];
+            source=lg.commrank + 1,
+            tag=0,
+        )
     end
     MPI.Waitall(reqs)
 

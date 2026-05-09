@@ -9,7 +9,7 @@ mutable struct SlowLifeGrid <: AbstractMatrix{Bool}
     birthsums::Vector{Int}    # list of neighbor sums that lead to cell birth
     survivalsums::Vector{Int} # list of neighbor sums that allow cell survival
 
-    function SlowLifeGrid(height, width; rule="B3/S23")
+    function SlowLifeGrid(height, width; rule = "B3/S23")
         birthsums, survivalsums = LifeGame.rulesums(LifeGame.LifeRule(rule))
         return new(zeros(height, width), zeros(height, width), birthsums, survivalsums)
     end
@@ -22,8 +22,8 @@ end
 # Implement AbstractArray interface for SlowLifeGrid
 Base.size(lg::SlowLifeGrid) = size(lg.grid)
 
-Base.@propagate_inbounds function Base.getindex( lg::SlowLifeGrid, x...)
-    return getindex( lg.grid, x...)
+Base.@propagate_inbounds function Base.getindex(lg::SlowLifeGrid, x...)
+    return getindex(lg.grid, x...)
 end
 
 Base.@propagate_inbounds function Base.setindex!(lg::SlowLifeGrid, x...)
@@ -42,7 +42,7 @@ function LifeGame.step!(lg::SlowLifeGrid)
         neighborsum = sum(@view lg.grid[neighborhood]) - lg.grid[I]
 
         survival = neighborsum in lg.survivalsums
-        birth    = neighborsum in lg.birthsums
+        birth = neighborsum in lg.birthsums
 
         lg.next[I] = lg.grid[I] && survival || birth
     end
