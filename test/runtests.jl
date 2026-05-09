@@ -17,8 +17,8 @@ function printlifediff(left, correct, actual; leftlabel)
     # Header
     println("Incorrect result (bad cells in red):")
     printedwidth = 2*size(left, 2)+4
-    print(  leftlabel, repeat(' ', max(0, printedwidth-length(label1))))
-    println("Correct", repeat(' ', max(0, printedwidth-length(label2))))
+    print(  leftlabel, repeat(' ', max(0, printedwidth-length(leftlabel))))
+    println("Actual",  repeat(' ', max(0, printedwidth-length("Actual"))))
 
     # Representation of whether the cell is on or off
     rep(onoroff) = onoroff ? "* " : "- "
@@ -123,11 +123,12 @@ end
 
     @testset failfast=true "LifePattern" begin
         rng = MersenneTwister(1)
-        lg = LifeGrid(rand(rng, Bool, 1000, 1000))
+        sizes = (5, 20, 80, 150)
+        CTypes = (UInt8, UInt16, UInt32, UInt64)
 
-        # Test many different sizes
-        inds = Int.(round.(2 .^(2:1.3:9)))
-        for M in inds, N in inds
+        for M in sizes, N in sizes
+            lg = LifeGrid(rand(rng, Bool, 500, 500), CType=rand(rng, CTypes))
+
             # Construction
             pattern = rand(rng, Bool, M, N)
             lp = LifePattern(pattern)
@@ -154,19 +155,19 @@ end
             end
             lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
             lgwithp2 = insert!(deepcopy(lg), i, j, lp)
-            identical = all(correct .== lgwithp2) # .== lgwithp1)
+            identical = all(correct .== lgwithp1 .== lgwithp2)
             if !identical
-                printlifediff(lgwithp1, lgwithp1, lgwithp2; leftlabel="Correct")
+                printlifediff(correct, correct, lgwithp2; leftlabel="Correct")
             end
             @test identical
 
-            # TODO: this is just testing that insert! is identical in both cases
-            for (gI, pI) in zip(CartesianIndex((i, j)):CartesianIndex((i+M-1, j+N-1)),
-                                CartesianIndices(pattern))
-                correct = lgwithp1[gI] == lgwithp1[gI] || lp[pI]
-                if !correct
-                    printlifediff(lgwithp1, lgwithp1, lgwithp2; leftlabel="Correct")
-                end
+            # Check halos by stepping
+            stepped = step!(LifeGrid(correct))
+            step!(lgwithp1)
+            step!(lgwithp2)
+            identical = all(stepped .== lgwithp1 .== lgwithp2)
+            if !identical
+                printlifediff(correct, stepped, lgwithp2; leftlabel="Previous")
             end
         end
     end
@@ -183,24 +184,6 @@ end
             @test LifeGame.updatedcluster(above, middle, below, rule) == result
         end
     end
-
-    #@testset "LifePattern insertion" begin
-    #    lg = LifeGrid(10, 100)
-    #    # Insert a few patterns into a grid, especially at cluster borders
-    #    for (pattern, i, j) in (([1 0 1], 1, 1),
-    #                            ([1 1 0 0 1 1 0 0 1
-    #                              0 0 1 1 1 0 0 1 1], 2, 1),
-    #                            ([1 1 1 0 1
-    #                              1 0 0 1 0], 4, 60),
-    #                            (rand(Bool, 3, 70), 6, 20))
-    #        insert!(lg, i, j, LifePattern(pattern))
-    #        x, y = size(pattern)
-    #        # The inserted pattern should be present at the correct place in the LifeGrid
-    #        @test all(lg[i:i+x-1,j:j+y-1] .== pattern)
-    #    end
-    #    # Make sure that an exception is thrown when out-of-bounds access is attempted
-    #    @test_throws BoundsError insert!(LifeGrid(4, 5), 2, 4, LifePattern([1 1 1]))
-    #end
 
     @testset "updatedchunkhalos" begin
         chunk = [0b0100000000000000,

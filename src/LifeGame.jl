@@ -13,19 +13,17 @@ The public interface to `LifeGame` includes the types [`LifeGame`](@ref) and
 # Examples
 
 ```jldoctest
-julia> using LifeGame
+julia> lg = LifeGrid(4, 5, rule="B36/S23");
 
-julia> lg = LifeGrid(4, 5, rule="B36/S23"); # simulate highlife
-
-julia> insert!(lg, 1, 1, LifePatterns.glider)
-4×5 LifeGrid:
+julia> insert!(lg, 1, 1, LifePatterns.glider1)
+4×5 LifeGrid{B36/S23, UInt8, UInt8}:
  0  1  0  0  0
  0  0  1  0  0
  1  1  1  0  0
  0  0  0  0  0
 
 julia> step!(lg)
-4×5 LifeGrid:
+4×5 LifeGrid{B36/S23, UInt8, UInt8}:
  0  0  0  0  0
  1  0  1  0  0
  0  1  1  0  0
@@ -42,9 +40,10 @@ The fundamental unit of a `LifeGrid` is the **cluster**, a row of 62 cells repre
 single `UInt64`; the two extra bits at the beginning and end of the cluster are **halo
 cells**, which hold the first and last cells of the clusters to the right and left,
 respectively, for numerical convenience. Zero padding is applied to each edge of the backing
-array, also for numerical convenience. The storage backing a 200×300 `LifeGrid` is thus a
-202×7 `Matrix{UInt64}`. This means that large grids can be stored efficiently: a
-100,000×100,000 cell `LifeGrid` occupies only 1.2 GiB of memory.
+array, also for numerical convenience. Inter-iteration halos are stored in packed matrices.
+The storage backing a 200×300 `LifeGrid` is thus a 202×7 `Matrix{UInt64}` plus a few much
+smaller matrices. This means that large grids can be stored efficiently: a 100,000×100,000
+cell `LifeGrid` occupies 1.3 GiB of memory.
 
 ## `step!` implementation
 
@@ -58,10 +57,10 @@ the cluster update works and how to specialize a rule to improve performance.
 
 `step!` is written to compile to highly vectorized instructions, uses CPU caches
 efficiently, and is parallelized. On a laptop with an AMD 7640U, it typically takes about
-300 μs to `step!` a 10,000×10,000 `LifeGrid` and 50 ms to `step!` a 100,000×100,000
-`LifeGrid` using the Conway's Game of Life rule. Since keeping the CPU fed is a major
-bottleneck when update operations are so fast, `step!` operates faster per cell when the
-grid it's working on fits in the CPU cache.
+4 μs to `step!` a 1,000×1,000 `LifeGrid` and 50 ms to `step!` a 100,000×100,000 `LifeGrid`
+when using the Conway's Game of Life rule. Since keeping the CPU fed is a major bottleneck
+when update operations are so fast, `step!` is usually memory-bound for larger grids on
+modern hardware.
 """
 module LifeGame
 

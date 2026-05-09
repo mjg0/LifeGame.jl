@@ -2,20 +2,30 @@ export LifePattern
 
 
 
-struct LifePattern <: AbstractMatrix{Bool}
+abstract type Mutability end
+struct Immutable <: Mutability end
+struct Mutable <: Mutability end
+
+
+
+struct LifePattern{M<:Mutability} <: AbstractMatrix{Bool}
     height::Int64
     width::Int64
     data::Vector{UInt64} # contains one more than necessary to speed up indexlifepattern
 
-    function LifePattern(m::Integer, n::Integer)
+    function LifePattern(m::Integer, n::Integer; mutable=true)
         data = zeros(UInt64, cld(m*n, nbits(UInt64))+1)
-        return new(m, n, data)
+        return new{mutable ? Mutable : Immutable}(m, n, data)
     end
 
-    function LifePattern(pattern::AbstractMatrix{<:Number})
+    function LifePattern(pattern::AbstractMatrix{<:Number}; mutable=true)
         lp = LifePattern(size(pattern)...)
         lp .= pattern.!=zero(eltype(pattern))
-        return lp
+        if mutable
+            return lp
+        else
+            return new{Immutable}(lp.height, lp.width, lp.data)
+        end
     end
 end
 
@@ -45,7 +55,7 @@ Base.@propagate_inbounds function Base.getindex(lp::LifePattern, i::Integer, j::
     return mask & lp.data[I] != zero(UInt64)
 end
 
-Base.@propagate_inbounds function Base.setindex!(lp::LifePattern, val::Number, i::Integer, j::Integer)
+Base.@propagate_inbounds function Base.setindex!(lp::LifePattern{Mutable}, val::Number, i::Integer, j::Integer)
     I, mask = indexlifepattern(lp, i, j)
 
     lp.data[I] = ifelse(val==zero(val),
