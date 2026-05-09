@@ -1,4 +1,4 @@
-export step!
+export step!, Serial, Parallel
 
 
 
@@ -77,6 +77,12 @@ Boundaries are special cases, but the rest of the update descends through each c
 
 
 
+function swapbuffers(buffers)
+    buffers.current, buffers.next = buffers.next, buffers.current
+end
+
+
+
 """
     step!(lg::LifeGrid)
     step!(lg::LifeGrid, threadmode::Symbol)
@@ -94,64 +100,38 @@ can improve performance by 10% for some rules. See the extended help for
 [`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
 Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
 """
-function step!(lg::LifeGrid{R,C,H}, ::Type{Par}) where {R,C,H,Par<:ThreadingMode}
-    grid = lg.grid
-
-    J1 = firstindex(lg.grid, 2) + 1
-    J2 = lastindex(lg.grid, 2) - 1
-
-    bufflen = nbits(H) + 2
-
-    endshift = mod(-size(lg, 2), nbits(C) - 2) + 1
+function step!(
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    ::Type{Par},
+) where {R,C,H,Tall,Wide,Par<:ThreadingMode}
+    # Get iteration bounds
+    I1, I2 = 1, gridheight(lg)
+    J1, J2 = 1, gridheight(lg) # compensate for ghost columns at edges
 
     @inbounds @batch_if Par for J = J1:J2
-        current = lg.buffers.a[Threads.threadid()]
-        next = lg.buffers.b[Threads.threadid()]
+        buffer = lg.buffers[Threads.threadid()]
 
-        inhalosleft = view(lg.halos.currentright, :, J - 1)
-        inhalosright = view(lg.halos.currentleft, :, J + 1)
-        outhalosleft = view(lg.halos.nextleft, :, J)
-        outhalosright = view(lg.halos.nextright, :, J)
+        updatebuffers!(buffer, lg, 1, J)
+        # grid[1,J] -> buffer[1,J]
 
-        above = zero(C)
-        updatehalos!(current, gridchunk(lg, 1, J), inhalosleft[1], inhalosright[1])
+        for I = I1:(I2-1)
+            updatebuffers!(buffer, lg, I + 1, J)
+            # grid[I,J], buffer[I,J] -> buffer[I,J], next[I+1,J]
 
-        # Update this row
-        for I = firstindex(inhalosleft):(lastindex(inhalosleft)-1)
-            updatehalos!(next, gridchunk(lg, I + 1, J), inhalosleft[I+1], inhalosright[I+1])
+            updategridchunk!(lg, buffer, I, J)
+            # buffer[I,J] -> grid[I,J]
 
-            current[1] = above
-            current[bufflen] = next[2]
-
-            updategridchunk!(gridchunk(lg, I, J), current, R, H)
-
-            # Zero trailing cells
-            if J == J2
-                zerotrailing!(gridchunk(lg, I, J), endshift, H)
-            end
-
-            outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
-
-            above = current[bufflen-1]
-
-            current, next = next, current
+            updatehalos!(lg, I, J)
+            # grid[I,J] -> halos[I,J]
         end
 
-        I = lastindex(inhalosleft)
+        swapbuffers(buffer)
 
-        current[1] = above
-        current[bufflen] = zero(C)
+        #buffer.current, buffer.next = buffer.next, buffer.current
+        updategridchunk!(lg, buffer, I2, J)
+        # buffer[I,J] -> grid[I,J]
 
-        updategridchunk!(gridchunk(lg, I, J), current, R, H)
-
-        if J == J2
-            zerotrailing!(gridchunk(lg, I, J), endshift, H)
-        end
-
-        # Zero the last+1 cell
-        grid[lg.height+2, J] = zero(C)
-
-        outhalosleft[I], outhalosright[I] = updatedchunkhalos(gridchunk(lg, I, J), H)
+        updatehalos!(lg, I2, J)
     end
 
     # Swap halos
@@ -171,63 +151,262 @@ function step!(lg::LifeGrid, threadmode::Symbol)
     end
 end
 
-step!(lg::LifeGrid) = step!(lg, size(lg.grid, 2)>3 ? Parallel : Serial)
+step!(lg::LifeGrid) = step!(lg, size(lg.grid, 2) > 3 ? Parallel : Serial)
 
 
 
-"""
+gridheight(lg::LifeGrid) = size(lg.halos.currentleft, 1)
 
-`out` is 2 longer than `in` and doesn't get its first or last cells updated
-"""
-Base.@propagate_inbounds @inline function updatehalos!(
-    out::AbstractVector{T},
-    in::AbstractVector{T},
-    lhalo::H,
-    rhalo::H,
-) where {T,H}
-    centermask = ~(lowbit(T) | highbit(T))
+gridwidth(lg::LifeGrid) = size(lg.halos.currentleft, 2) - 2
 
-    @simd for i = 1:nbits(H)
-        lbit = T(lhalo >> (nbits(H) - i) & one(H)) << (nbits(T) - 1)
-        rbit = T(rhalo >> (nbits(H) - i) & one(H))
 
-        out[i+1] = (in[i] & centermask) | lbit | rbit
-    end
+
+Base.@propagate_inbounds @inline function gridchunk(
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    I,
+    J,
+) where {R,C,H,Tall,Wide}
+    i = (I - 1) * nbits(H) + 2
+    return view(lg.grid, i:(i+nbits(H)-1), J + 1)
 end
 
 
 
+"""
+Begin state: buffer.next has the previous iteration's results
+End state: buffer.current has this iteration's result
+
+Reads from lg.grid, lg.halos, and buffer.next, writes to buffer.current and buffer.next; swaps buffer.{current,next}
+"""
+Base.@propagate_inbounds @inline function updatebuffers!(
+    buffer::Buffer{C},
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    I::Integer,
+    J::Integer,
+) where {R,C,H,Tall,Wide}
+    # Convenience variables
+    chunk = gridchunk(lg, I, J)
+    cbuf = buffer.current
+    nbuf = buffer.next
+    lhalo = lg.halos.currentright[I, J]
+    rhalo = lg.halos.currentleft[I, J+2]
+
+    # Before overwriting it, store the last real element of cbuf
+    nbuf[begin] = ifelse(I == 1, zero(C), cbuf[end-1])
+
+    #if Wide
+        # Apply lhalo and rhalo to chunk, storing the results in nbuf
+        @simd for k = 1:nbits(H)
+            centermask = ~(lowbit(C) | highbit(C)) # all cells but the outermost two on
+            lbit = C(lhalo >> (nbits(H) - k) & one(H)) << (nbits(C) - 1)
+            rbit = C(rhalo >> (nbits(H) - k) & one(H))
+
+            cbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
+        end
+    #else
+        # If there are no halos that require updating, a copy is all that's needed
+        cbuf[(begin+1):(end-1)] .= chunk
+    #end
+
+    # Get the first real element of nbuf in preparation for the next iteration
+    nbuf[end] = ifelse(I == gridheight(lg), zero(C), cbuf[begin+1])
+
+    buffer.current, buffer.next = buffer.next, buffer.current
+
+    return nothing
+end
+
+
 
 """
-
-`in` should be two elements longer than `out`
+Reads from buffers.current, writes to lg.grid
 """
 Base.@propagate_inbounds @inline function updategridchunk!(
-    out::AbstractVector,
-    in::AbstractVector,
-    rule::R,
-    ::Type{H},
-) where {R,H}
-    @simd for i = 1:(8*sizeof(H))
-        out[i] = updatedcluster(in[i], in[i+1], in[i+2], rule)
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    buffer::Buffer{C},
+    I::Integer,
+    J::Integer,
+) where {R,C,H,Tall,Wide}
+    chunk = gridchunk(lg, I, J)
+    cbuf = buffer.current
+
+    # Update each cluster in chunk
+    @simd for i = 1:nbits(H)
+        chunk[i] = updatedcluster(cbuf[i], cbuf[i+1], cbuf[i+2], R)
     end
-end
 
+    # Zero out trailing columns
+    if J == gridwidth(lg)-1
+        # How many bits to zero out
+        n = mod(-size(lg, 2), nbits(C) - 2) + 1
 
-
-Base.@propagate_inbounds @inline function gridchunk(lg::LifeGrid{R,C,H}, I, J) where {R,C,H}
-    i = (I - 1) * nbits(H) + 2
-    return view(lg.grid, i:(i+nbits(H)-1), J)
-end
-
-
-
-Base.@propagate_inbounds @inline function zerotrailing!(
-    cells::AbstractVector,
-    shift,
-    ::Type{H},
-) where {H}
-    @simd for i = 1:(8*sizeof(H))
-        cells[i] = (cells[i] >> shift) << shift
+        # Roll off n bits for each cluster
+        @simd for i = 1:nbits(H)
+            chunk[i] = (chunk[i] >> n) << n
+        end
     end
+
+    # Zero out trailing rows
+    if I == gridheight(lg)
+        lg.grid[lg.height+2, J] = zero(C)
+    end
+
+    return nothing
 end
+
+
+
+"""
+Reads from lg.grid and writes to lg.halos
+"""
+Base.@propagate_inbounds @inline function updatehalos!(
+    lg::LifeGrid{R,C,H,Tall,true},
+    I::Integer,
+    J::Integer,
+) where {R,C,H,Tall}
+    chunk = gridchunk(lg, I, J)
+
+    lhalo = zero(H)
+    rhalo = zero(H)
+
+    for k = 1:nbits(H)
+        # Get this cluster's halos
+        lshift = nbits(C) - 2
+        rshift = 1
+        lbit = H((chunk[k] >> lshift) & one(C))
+        rbit = H((chunk[k] >> rshift) & one(C))
+
+        # Update lhalo and rhalo at this iteration's bit
+        lhalo |= lbit << (nbits(H) - k)
+        rhalo |= rbit << (nbits(H) - k)
+    end
+
+    lg.halos.nextleft[I, J+1] = lhalo
+    lg.halos.nextright[I, J+1] = rhalo
+
+    return nothing
+end
+
+updatehalos!(::LifeGrid{R,C,H,Tall,false}, args...) where {R,C,H,Tall} = nothing
+
+
+
+#Base.@propagate_inbounds @inline function updatehalos!(
+#    out::AbstractVector{T},
+#    in::AbstractVector{T},
+#    lhalo::H,
+#    rhalo::H,
+#) where {T,H}
+#    centermask = ~(lowbit(T) | highbit(T))
+#
+#    @simd for k = 1:nbits(H)
+#        lbit = T(lhalo >> (nbits(H) - k) & one(H)) << (nbits(T) - 1)
+#        rbit = T(rhalo >> (nbits(H) - k) & one(H))
+#
+#        out[k+1] = (in[k] & centermask) | lbit | rbit
+#    end
+#end
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#"""
+#
+#`out` is 2 longer than `in` and doesn't get its first or last cells updated
+#"""
+#Base.@propagate_inbounds @inline function updatehalos!(
+#    out::AbstractVector{T},
+#    in::AbstractVector{T},
+#    lhalo::H,
+#    rhalo::H,
+#) where {T,H}
+#    centermask = ~(lowbit(T) | highbit(T))
+#
+#    @simd for k = 1:nbits(H)
+#        lbit = T(lhalo >> (nbits(H) - k) & one(H)) << (nbits(T) - 1)
+#        rbit = T(rhalo >> (nbits(H) - k) & one(H))
+#
+#        out[k+1] = (in[k] & centermask) | lbit | rbit
+#    end
+#end
+#
+#
+#
+#
+#
+#Base.@propagate_inbounds @inline function updatehalos!(lg::LifeGame{R,C,H,Wide,Tall}, I::Integer, J::Integer) where {R,C,H,Wide,Tall}
+#    centermask = ~(lowbit(T) | highbit(T))
+#
+#    chunk = gridchunk(lg, I, J)
+#    buffer = lg.buffers.current
+#
+#    if Wide
+#        lhalo = lg.halos.currentright[I,J]
+#        rhalo = lg.halos.currentleft[I,J]
+#
+#        @simd for k = 1:nbits(H)
+#            lbit = T(lhalo >> (nbits(H) - k) & one(H)) << (nbits(T) - 1)
+#            rbit = T(rhalo >> (nbits(H) - k) & one(H))
+#
+#            buffer[k+1] = (chunk[k] & centermask) | lbit | rbit
+#        end
+#    else
+#        buffer[begin+1:end-1]
+#    end
+#end
+#
+#
+#
+#
+#"""
+#
+#`in` should be two elements longer than `out`
+#"""
+#Base.@propagate_inbounds @inline function updategridchunk!(
+#    out::AbstractVector,
+#    in::AbstractVector,
+#    rule::R,
+#    ::Type{H},
+#) where {R,H}
+#    @simd for i = 1:(8*sizeof(H))
+#        out[i] = updatedcluster(in[i], in[i+1], in[i+2], rule)
+#    end
+#end
+#
+#
+#
+#
+#
+#
+#Base.@propagate_inbounds @inline function zerotrailing!(
+#    cells::AbstractVector,
+#    shift,
+#    ::Type{H},
+#) where {H}
+#    @simd for i = 1:(8*sizeof(H))
+#        cells[i] = (cells[i] >> shift) << shift
+#    end
+#end
+#

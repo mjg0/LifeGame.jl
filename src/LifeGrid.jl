@@ -70,7 +70,7 @@ struct LifeRule{Birth,Survival}
 end
 
 function Base.show(io::IO, ::LifeRule{B,S}) where {B,S}
-    rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init="")
+    rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init = "")
     print(io, "B$(rulestr(B))/S$(rulestr(S))")
 end
 
@@ -94,15 +94,12 @@ mutable struct Halos{H}
     Halos(H, m, n) = new{H}(ntuple(_ -> zeros(H, m, n), 4)...)
 end
 
-struct Buffers{C}
+mutable struct Buffer{C}
     # Inner vectors store a chunk's worth of cells; there are Threads.nthreads() of each
-    a::Vector{Vector{C}}
-    b::Vector{Vector{C}}
+    current::Vector{C}
+    next::Vector{C}
 
-    function Buffers(C::Type, H::Type)
-        buffers = ([zeros(C, nbits(H) + 2) for _ in 1:Threads.nthreads()] for _ in 1:2)
-        return new{C}(buffers...)
-    end
+    Buffer(::Type{C}, ::Type{H}) where {C, H} = new{C}(ntuple(_ -> zeros(C, nbits(H) + 2), 2)...)
 end
 
 
@@ -157,20 +154,20 @@ Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 
 True or non-zero values indicate living cells; false or zero values indicate dead cells.
 """
-struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
+struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
     height::Int64
     width::Int64
     grid::Matrix{CType}
     halos::Halos{HType}
-    buffers::Buffers{CType}
+    buffers::Vector{Buffer{CType}}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(
         m::Integer,
         n::Integer;
-        rule::AbstractString="B3/S23",
-        CType::Type{<:Unsigned}=smallestuint(n + 2),
-        HType::Type{<:Unsigned}=smallestuint(m),
+        rule::AbstractString = "B3/S23",
+        CType::Type{<:Unsigned} = smallestuint(n + 2),
+        HType::Type{<:Unsigned} = smallestuint(m),
     )
         # Halos
         haloheight = cld(m, nbits(HType))
@@ -178,14 +175,18 @@ struct LifeGrid{LifeRule,CType,HType} <: AbstractMatrix{Bool}
         halos = Halos(HType, haloheight, halowidth)
 
         # Buffers
-        buffers = Buffers(CType, HType)
+        buffers = [Buffer(CType, HType) for _ = 1:Threads.nthreads()]
 
         # Clusters
         gridheight = nbits(HType) * haloheight + 2 # store extra rows for even chunk sizes
         gridwidth = halowidth
         grid = zeros(CType, gridheight, gridwidth)
 
-        return new{LifeRule(rule),CType,HType}(m, n, grid, halos, buffers)
+        # Size parameters
+        Tall = haloheight > 1
+        Wide = halowidth > 3
+
+        return new{LifeRule(rule),CType,HType,Tall,Wide}(m, n, grid, halos, buffers)
     end
 
     function LifeGrid(grid::AbstractMatrix{T}; kw...) where {T<:Number}

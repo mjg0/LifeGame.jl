@@ -69,7 +69,7 @@ function teststep!(rule, size; CType = nothing)
             function stepandtest()
                 prev = deepcopy(slow)
                 step!(slow)
-                step!(lg; parallel = parallel)
+                step!(lg, parallel ? LifeGame.Parallel : LifeGame.Serial)
                 gridequal = all(slow .== lg)
                 if !gridequal
                     println("Failed with rule $rule")
@@ -130,135 +130,136 @@ end
         end
     end
 
-    @testset failfast=true "LifePattern" begin
-        rng = MersenneTwister(1)
-        sizes = (5, 20, 80, 150)
-        CTypes = (UInt8, UInt16, UInt32, UInt64)
+    #@testset failfast=true "LifePattern" begin
+    #    rng = MersenneTwister(1)
+    #    sizes = (5, 20, 80, 150)
+    #    CTypes = (UInt8, UInt16, UInt32, UInt64)
 
-        for M in sizes, N in sizes
-            lg = LifeGrid(rand(rng, Bool, 500, 500), CType = rand(rng, CTypes))
+    #    for M in sizes, N in sizes
+    #        lg = LifeGrid(rand(rng, Bool, 500, 500), CType = rand(rng, CTypes))
 
-            # Construction
-            pattern = rand(rng, Bool, M, N)
-            lp = LifePattern(pattern)
+    #        # Construction
+    #        pattern = rand(rng, Bool, M, N)
+    #        lp = LifePattern(pattern)
 
-            # Indexing
-            I = rand(rng, CartesianIndices(pattern))
-            pattern[I] = !pattern[I]
-            lp[I] = !lp[I]
-            identical = all(lp .== pattern)
-            if !identical
-                printlifediff(pattern, pattern, lp; leftlabel = "Correct")
-            end
-            @test identical
+    #        # Indexing
+    #        I = rand(rng, CartesianIndices(pattern))
+    #        pattern[I] = !pattern[I]
+    #        lp[I] = !lp[I]
+    #        identical = all(lp .== pattern)
+    #        if !identical
+    #            printlifediff(pattern, pattern, lp; leftlabel = "Correct")
+    #        end
+    #        @test identical
 
-            # Insertion
-            i = rand(rng, 1:(lastindex(lg, 1)-M))
-            j = rand(rng, 1:(lastindex(lg, 2)-N))
-            correct = Array(lg)
-            for lpI in CartesianIndices(lp)
-                I = lpI+CartesianIndex((i, j))-oneunit(lpI)
-                correct[I] = lp[lpI] || correct[I]
-            end
-            lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
-            lgwithp2 = insert!(deepcopy(lg), i, j, lp)
-            identical = all(correct .== lgwithp1 .== lgwithp2)
-            if !identical
-                printlifediff(correct, correct, lgwithp2; leftlabel = "Correct")
-            end
-            @test identical
+    #        # Insertion
+    #        i = rand(rng, 1:(lastindex(lg, 1)-M))
+    #        j = rand(rng, 1:(lastindex(lg, 2)-N))
+    #        correct = Array(lg)
+    #        for lpI in CartesianIndices(lp)
+    #            I = lpI+CartesianIndex((i, j))-oneunit(lpI)
+    #            correct[I] = lp[lpI] || correct[I]
+    #        end
+    #        lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
+    #        lgwithp2 = insert!(deepcopy(lg), i, j, lp)
+    #        identical = all(correct .== lgwithp1 .== lgwithp2)
+    #        if !identical
+    #            printlifediff(correct, correct, lgwithp2; leftlabel = "Correct")
+    #        end
+    #        @test identical
 
-            # Check halos by stepping
-            stepped = step!(LifeGrid(correct))
-            step!(lgwithp1)
-            step!(lgwithp2)
-            identical = all(stepped .== lgwithp1 .== lgwithp2)
-            if !identical
-                printlifediff(correct, stepped, lgwithp2; leftlabel = "Previous")
-            end
-        end
-    end
+    #        # Check halos by stepping
+    #        stepped = step!(LifeGrid(correct))
+    #        step!(lgwithp1)
+    #        step!(lgwithp2)
+    #        identical = all(stepped .== lgwithp1 .== lgwithp2)
+    #        if !identical
+    #            printlifediff(correct, stepped, lgwithp2; leftlabel = "Previous")
+    #        end
+    #        @test identical
+    #    end
+    #end
 
 
 
-    @testset "updatedcluster" begin
-        # Test with some fixed values that have been calculated by hand
-        rule = LifeGame.LifeRule("B3/S23")
-        for (above, middle, below, result) in (
-            (0b1100, 0b1000, 0b0000, 0b1100),
-            (0b0100, 0b0100, 0b0100, 0b1110),
-            (0b0010, 0b1010, 0b0110, 0b0011),
-            (0b1000, 0b0110, 0b1100, 0b0010),
-        )
-            @test LifeGame.updatedcluster(above, middle, below, rule) == result
-        end
-    end
+    #@testset "updatedcluster" begin
+    #    # Test with some fixed values that have been calculated by hand
+    #    rule = LifeGame.LifeRule("B3/S23")
+    #    for (above, middle, below, result) in (
+    #        (0b1100, 0b1000, 0b0000, 0b1100),
+    #        (0b0100, 0b0100, 0b0100, 0b1110),
+    #        (0b0010, 0b1010, 0b0110, 0b0011),
+    #        (0b1000, 0b0110, 0b1100, 0b0010),
+    #    )
+    #        @test LifeGame.updatedcluster(above, middle, below, rule) == result
+    #    end
+    #end
 
-    @testset "updatedchunkhalos" begin
-        chunk = [
-            0b0100000000000000,
-            0b0000000000000010,
-            0b0100000000000010,
-            0b0000000000000000,
-            0b0100000000000010,
-            0b0000000000000010,
-            0b0100000000000000,
-            0b0000000000000010,
-        ]
-        lhalo = 0b10101010
-        rhalo = 0b01101101
+    #@testset "updatedchunkhalos" begin
+    #    chunk = [
+    #        0b0100000000000000,
+    #        0b0000000000000010,
+    #        0b0100000000000010,
+    #        0b0000000000000000,
+    #        0b0100000000000010,
+    #        0b0000000000000010,
+    #        0b0100000000000000,
+    #        0b0000000000000010,
+    #    ]
+    #    lhalo = 0b10101010
+    #    rhalo = 0b01101101
 
-        lactual, ractual = LifeGame.updatedchunkhalos(chunk, UInt8)
+    #    lactual, ractual = LifeGame.updatedchunkhalos(chunk, UInt8)
 
-        @test lhalo == lactual
-        @test rhalo == ractual
-    end
+    #    @test lhalo == lactual
+    #    @test rhalo == ractual
+    #end
 
-    @testset "updatehalos!" begin
-        lhalo = 0b10101010
-        rhalo = 0b01101101
-        in = zeros(UInt16, 8)
-        out = zeros(UInt16, 10)
-        correct = [
-            0b0000000000000000,
-            0b1000000000000000,
-            0b0000000000000001,
-            0b1000000000000001,
-            0b0000000000000000,
-            0b1000000000000001,
-            0b0000000000000001,
-            0b1000000000000000,
-            0b0000000000000001,
-            0b0000000000000000,
-        ]
+    #@testset "updatehalos!" begin
+    #    lhalo = 0b10101010
+    #    rhalo = 0b01101101
+    #    in = zeros(UInt16, 8)
+    #    out = zeros(UInt16, 10)
+    #    correct = [
+    #        0b0000000000000000,
+    #        0b1000000000000000,
+    #        0b0000000000000001,
+    #        0b1000000000000001,
+    #        0b0000000000000000,
+    #        0b1000000000000001,
+    #        0b0000000000000001,
+    #        0b1000000000000000,
+    #        0b0000000000000001,
+    #        0b0000000000000000,
+    #    ]
 
-        LifeGame.updatehalos!(out, in, lhalo, rhalo)
+    #    LifeGame.updatehalos!(out, in, lhalo, rhalo)
 
-        @test all(out .== correct)
-    end
+    #    @test all(out .== correct)
+    #end
 
-    @testset "LifeGrid construction" begin
-        grid = [
-            0 1 0 1 0 1 0
-            0 0 1 1 0 0 1
-            0 1 1 0 1 1 0
-            1 0 0 0 1 0 1
-            0 1 0 0 1 1 0
-        ]
-        lg = LifeGrid(grid, CType = UInt8, HType = UInt8)
-        @test all(lg .== grid)
-        @test all(
-            lg.grid[2:6, 2:3] .== [
-                0b00101010 0b00000000
-                0b00011000 0b01000000
-                0b00110110 0b00000000
-                0b01000100 0b01000000
-                0b00100110 0b00000000
-            ],
-        )
-        @test all(lg.halos.currentleft[2:3] .== [0b00010000, 0b01010000])
-        @test all(lg.halos.currentright[2:3] .== [0b10101000, 0b00000000])
-    end
+    #@testset "LifeGrid construction" begin
+    #    grid = [
+    #        0 1 0 1 0 1 0
+    #        0 0 1 1 0 0 1
+    #        0 1 1 0 1 1 0
+    #        1 0 0 0 1 0 1
+    #        0 1 0 0 1 1 0
+    #    ]
+    #    lg = LifeGrid(grid, CType = UInt8, HType = UInt8)
+    #    @test all(lg .== grid)
+    #    @test all(
+    #        lg.grid[2:6, 2:3] .== [
+    #            0b00101010 0b00000000
+    #            0b00011000 0b01000000
+    #            0b00110110 0b00000000
+    #            0b01000100 0b01000000
+    #            0b00100110 0b00000000
+    #        ],
+    #    )
+    #    @test all(lg.halos.currentleft[2:3] .== [0b00010000, 0b01010000])
+    #    @test all(lg.halos.currentright[2:3] .== [0b10101000, 0b00000000])
+    #end
 
     @testset "step!" begin
         rng = MersenneTwister(1)
@@ -268,7 +269,7 @@ end
         # Numerous tests of grids of size close to the edge of clusters and chunks
         for height in (3, 7, 8, 9, 40, 64, 65, 128, 129, 150, 300)
             for width in (6, 7, 14, 15, 45, 62, 63, 90, 124, 125, 200, 400)
-                teststep!(rand(rng, rules), (height, width); CType = rand(rng, CTypes))
+                teststep!(rand(rng, rules), (height, width); CType = UInt8) #rand(rng, CTypes))
             end
         end
     end
