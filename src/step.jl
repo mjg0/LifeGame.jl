@@ -40,6 +40,24 @@ end
 
 
 
+# disable_polyester_threads is noticeably expensive for small grids, @batch_if allays that
+abstract type ThreadingMode end
+struct Serial <: ThreadingMode end
+struct Parallel <: ThreadingMode end
+macro batch_if(mode, loop)
+    return esc(quote
+        if $mode === Parallel
+            @batch $loop
+        elseif $mode === Serial
+            $loop
+        else
+            throw(ArgumentError("expected Serial or Parallel"))
+        end
+    end)
+end
+
+
+
 """
     stepraw!(lg::LifeGrid)
 
@@ -60,13 +78,15 @@ Boundaries are special cases, but the rest of the update descends through each c
 
 
 """
-    step!(lg::LifeGrid; parallel::Bool)
+    step!(lg::LifeGrid)
+    step!(lg::LifeGrid, threadmode::Symbol)
 
 Update `lg` one generation according to the [`rule`](@ref) associated with it.
 
 All cells outside of the grid boundary are fixed at zero.
 
-By default, `parallel` is set to true if the grid backing `lg` has multiple columns.
+`threadmode` can be `:serial` or `:parallel`. By default, it's set to true if the grid
+backing `lg` has multiple columns.
 
 A generic algorithm for updating each cluster in the grid is used by default. The compiler
 does a decent job of optimizing for most rules, but hand-tuning the cluster update function
@@ -74,15 +94,7 @@ can improve performance by 10% for some rules. See the extended help for
 [`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
 Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
 """
-function step!(lg::LifeGrid{R,C,H}; parallel=size(lg.grid, 2) > 3) where {R,C,H}
-    # Disable polyester threads and recurse if `parallel` is false
-    if !parallel
-        disable_polyester_threads() do
-            step!(lg, parallel=true) # parallel=true stops recursion
-        end
-        return lg
-    end
-
+function step!(lg::LifeGrid{R,C,H}, ::Type{Par}) where {R,C,H,Par<:ThreadingMode}
     grid = lg.grid
 
     J1 = firstindex(lg.grid, 2) + 1
@@ -92,7 +104,7 @@ function step!(lg::LifeGrid{R,C,H}; parallel=size(lg.grid, 2) > 3) where {R,C,H}
 
     endshift = mod(-size(lg, 2), nbits(C) - 2) + 1
 
-    @inbounds @batch for J = J1:J2
+    @inbounds @batch_if Par for J = J1:J2
         current = lg.buffers.a[Threads.threadid()]
         next = lg.buffers.b[Threads.threadid()]
 
@@ -147,8 +159,19 @@ function step!(lg::LifeGrid{R,C,H}; parallel=size(lg.grid, 2) > 3) where {R,C,H}
     lg.halos.currentright, lg.halos.nextright = lg.halos.nextright, lg.halos.currentright
 
     return lg
-
 end
+
+function step!(lg::LifeGrid, threadmode::Symbol)
+    if threadmode === :serial
+        return step!(lg, Serial)
+    elseif threadmode === :parallel
+        return step!(lg, Parallel)
+    else
+        throw(ArgumentError("threadmode must be either :serial or :parallel"))
+    end
+end
+
+step!(lg::LifeGrid) = step!(lg, size(lg.grid, 2)>3 ? Parallel : Serial)
 
 
 
