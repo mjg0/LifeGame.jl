@@ -158,9 +158,7 @@ end
             correct = Array(lg)
             for lpI in CartesianIndices(lp)
                 I = lpI+CartesianIndex((i, j))-oneunit(lpI)
-                if lp[lpI]
-                    correct[I] = true
-                end
+                correct[I] = lp[lpI] || correct[I]
             end
             lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
             lgwithp2 = insert!(deepcopy(lg), i, j, lp)

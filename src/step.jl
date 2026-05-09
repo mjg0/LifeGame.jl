@@ -8,9 +8,9 @@ export step!
 Return the outgoing left and right halo cells of `chunk` as packed bits in two `H`s.
 
 The second bit in the first element of `chunk` goes into the top bit of the left halo, the
-second bit of the next element into the second bit, etc. Likewise, the second from the last
-bit in the first element of `chunk` goes into the top bit of the right halo, etc. `chunk`
-must thus be of length `8*sizeof(H)`.
+second bit of the next element into the second bit of the left halo, etc. Likewise, the
+second from the last bit in the first element of `chunk` goes into the top bit of the right
+halo, etc. `chunk` must thus be of length `8*sizeof(H)`.
 """
 Base.@propagate_inbounds @inline function updatedchunkhalos(
     chunk::AbstractVector{C},
@@ -56,7 +56,33 @@ Boundaries are special cases, but the rest of the update descends through each c
 1. The current chunk's clusters are updated from the previous iteration's buffer
 1. The newly updated chunk's halo bits are extracted for future iterations
 """
-function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
+
+
+
+"""
+    step!(lg::LifeGrid; parallel::Bool)
+
+Update `lg` one generation according to the [`rule`](@ref) associated with it.
+
+All cells outside of the grid boundary are fixed at zero.
+
+By default, `parallel` is set to true if the grid backing `lg` has multiple columns.
+
+A generic algorithm for updating each cluster in the grid is used by default. The compiler
+does a decent job of optimizing for most rules, but hand-tuning the cluster update function
+can improve performance by 10% for some rules. See the extended help for
+[`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
+Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
+"""
+function step!(lg::LifeGrid{R,C,H}; parallel=size(lg.grid, 2) > 3) where {R,C,H}
+    # Disable polyester threads and recurse if `parallel` is false
+    if !parallel
+        disable_polyester_threads() do
+            step!(lg, parallel=true) # parallel=true stops recursion
+        end
+        return lg
+    end
+
     grid = lg.grid
 
     J1 = firstindex(lg.grid, 2) + 1
@@ -121,33 +147,7 @@ function stepraw!(lg::LifeGrid{R,C,H}) where {R,C,H}
     lg.halos.currentright, lg.halos.nextright = lg.halos.nextright, lg.halos.currentright
 
     return lg
-end
 
-
-
-"""
-    step!(lg::LifeGrid; parallel::Bool)
-
-Update `lg` one generation according to the [`rule`](@ref) associated with it.
-
-All cells outside of the grid boundary are fixed at zero.
-
-By default, `parallel` is set to true if the grid backing `lg` has multiple columns.
-
-A generic algorithm for updating each cluster in the grid is used by default. The compiler
-does a decent job of optimizing for most rules, but hand-tuning the cluster update function
-can improve performance by 10% for some rules. See the extended help for
-[`LifeGame.updatedcluster`](@ref) for instructions on specializing the cluster update.
-Specializations are provided for commonly used rules (`B3/S23`, `B36/S23`, and `B2/s`).
-"""
-function step!(lg::LifeGrid; parallel=size(lg.grid, 2) > 3)
-    if parallel
-        return stepraw!(lg)
-    else
-        disable_polyester_threads() do
-            return stepraw!(lg)
-        end
-    end
 end
 
 

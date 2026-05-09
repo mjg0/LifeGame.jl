@@ -81,6 +81,9 @@ end
     Halos{H}
 
 A type to store the halos between the columns of a `LifeGrid`'s `grid`.
+
+There are 4 matrices, each of the same size as `grid`: right and left halos, for both the
+current and next iterations. See [`step!`](@ref)
 """
 mutable struct Halos{H}
     currentleft::Matrix{H}
@@ -223,6 +226,43 @@ end
 
 
 
+"""
+    indexhalos(lg::LifeGrid, i, j)
+
+Return an index and mask for indexing the halos in `lg`, given conceptual index `(i, j)`.
+
+Use it thus:
+
+```julia
+halos = lg.halos.leftnext # output left halos
+I, mask = indexhalos(lg, i, j)
+
+# Set to true
+halos[I] = halos |  mask
+
+# Set to false
+halos[I] = halos & ~mask
+```
+"""
+Base.@propagate_inbounds @inline function indexhalos(
+    lg::LifeGrid{R,C,H},
+    i::Integer,
+    j::Integer,
+) where {R,C,H}
+    I, J, _ = indexlifegrid(lg, i, j)
+
+    # The index in the halo array
+    hidx = CartesianIndex((I - 2) ÷ nbits(H) + 1, J)
+
+    # A single-bit mask with the appropriate shift
+    k = (I - 2) % nbits(H) + 1
+    mask = one(H) << (nbits(H) - k)
+
+    return hidx, mask
+end
+
+
+
 # AbstractArray interface for LifeGrid
 Base.size(lg::LifeGrid) = lg.height, lg.width
 
@@ -293,42 +333,3 @@ rulesums(N::Integer) = [i for i = 1:8 if N >> (i - 1) & 0x01 == 0x01]
 rulesums(::Rule{N}) where {N} = rulesums(N)
 
 rulesums(::LifeRule{B,S}) where {B,S} = rulesums(B), rulesums(S)
-
-
-
-
-# Function to index halos
-"""
-    indexhalos(lg::LifeGrid, i, j)
-
-Return an index and mask for indexing the halos in `lg`, given conceptual index `(i, j)`.
-
-Use it thus:
-
-```julia
-halos = lg.lefthalos[1] # output left halos
-I, mask = indexhalos(lg, i, j)
-
-# Set to true
-halos[I] = halos |  mask
-
-# Set to false
-halos[I] = halos & ~mask
-```
-"""
-Base.@propagate_inbounds @inline function indexhalos(
-    lg::LifeGrid{R,C,H},
-    i::Integer,
-    j::Integer,
-) where {R,C,H}
-    I, J, _ = indexlifegrid(lg, i, j)
-
-    # The index in the halo array
-    hidx = CartesianIndex((I - 2) ÷ nbits(H) + 1, J)
-
-    # A single-bit mask with the appropriate shift
-    k = (I - 2) % nbits(H) + 1
-    mask = one(H) << (nbits(H) - k)
-
-    return hidx, mask
-end
