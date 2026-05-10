@@ -257,7 +257,7 @@ Base.@propagate_inbounds @inline function indexhalos(
     hidx = CartesianIndex((I - 1) ÷ nbits(H) + 1, J)
 
     # A single-bit mask with the appropriate shift
-    k = (I - 2) % nbits(H) + 1
+    k = (I - 1) % nbits(H) + 1
     mask = one(H) << (nbits(H) - k)
 
     return hidx, mask

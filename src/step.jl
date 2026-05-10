@@ -216,7 +216,7 @@ Base.@propagate_inbounds @inline function updategridchunk!(
     end
 
     # Zero out trailing rows
-    if I == gridheight(lg)
+    if I == gridheight(lg) && size(lg.grid, 1) > lg.height
         lg.grid[lg.height+1, J] = zero(C)
     end
 
