@@ -7,7 +7,7 @@ export LifeGridMPI, step!
 
 
 # Determine the sub-width of the nth slice (of N, starting at 0) given a total width
-function slicewidth(width, N, n=0)
+function slicewidth(width, N, n = 0)
     gridwidth = cld(width, LifeGame.CELLS_PER_CLUSTER)
     subwidth = cld(gridwidth, N) * LifeGame.CELLS_PER_CLUSTER
     return min((n + 1) * subwidth, width) - n * subwidth
@@ -108,17 +108,23 @@ function step!(lg::LifeGridMPI; kw...)
     # Exchange halos before running the update
     reqs = lg.halorequests
     @inbounds if lg.commrank > 0             # Left halo
-        MPI.Isend(lg.leftsendbuf, MPI.COMM_WORLD, reqs[1]; dest=lg.commrank - 1, tag=0)
-        MPI.Irecv!(lg.leftrecvbuf, MPI.COMM_WORLD, reqs[2]; source=lg.commrank - 1, tag=1)
+        MPI.Isend(lg.leftsendbuf, MPI.COMM_WORLD, reqs[1]; dest = lg.commrank - 1, tag = 0)
+        MPI.Irecv!(
+            lg.leftrecvbuf,
+            MPI.COMM_WORLD,
+            reqs[2];
+            source = lg.commrank - 1,
+            tag = 1,
+        )
     end
     @inbounds if lg.commrank < lg.commsize - 1 # Right halo
-        MPI.Isend(lg.rightsendbuf, MPI.COMM_WORLD, reqs[3]; dest=lg.commrank + 1, tag=1)
+        MPI.Isend(lg.rightsendbuf, MPI.COMM_WORLD, reqs[3]; dest = lg.commrank + 1, tag = 1)
         MPI.Irecv!(
             lg.rightrecvbuf,
             MPI.COMM_WORLD,
             reqs[4];
-            source=lg.commrank + 1,
-            tag=0,
+            source = lg.commrank + 1,
+            tag = 0,
         )
     end
     MPI.Waitall(reqs)

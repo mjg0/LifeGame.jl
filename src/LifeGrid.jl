@@ -230,6 +230,25 @@ end
 
 
 """
+    gridchunk(lg::LifeGrid, I, J)
+
+Return a view of the `(I, J)`th chunk of `lg`.
+
+A "chunk" is a section of a column as many elements long as `lg`'s halo type has bits. This
+is usually 64 clusters for large grids, but could be as few as 8.
+"""
+Base.@propagate_inbounds @inline function gridchunk(
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    I,
+    J,
+) where {R,C,H,Tall,Wide}
+    i = (I - 1) * nbits(H) + 1
+    return view(lg.grid, i:(i+nbits(H)-1), J)
+end
+
+
+
+"""
     indexhalos(lg::LifeGrid, i, j)
 
 Return an index and mask for indexing the halos in `lg`, given conceptual index `(i, j)`.
