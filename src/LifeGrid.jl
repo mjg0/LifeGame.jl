@@ -70,7 +70,7 @@ struct LifeRule{Birth,Survival}
 end
 
 function Base.show(io::IO, ::LifeRule{B,S}) where {B,S}
-    rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init="")
+    rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init = "")
     print(io, "B$(rulestr(B))/S$(rulestr(S))")
 end
 
@@ -83,7 +83,7 @@ end
 A type to store the halos between the columns of a `LifeGrid`'s `grid`.
 
 There are 4 matrices, each of the same size as `grid`: right and left halos, for both the
-current and next iterations. See [`step!`](@ref)
+current and next iterations.
 """
 mutable struct Halos{H}
     currentleft::Matrix{H}
@@ -92,14 +92,6 @@ mutable struct Halos{H}
     nextright::Matrix{H}
 
     Halos(H, m, n) = new{H}(ntuple(_ -> zeros(H, m, n), 4)...)
-end
-
-mutable struct Buffer{C}
-    # Inner vectors store a chunk's worth of cells; there are Threads.nthreads() of each
-    current::Vector{C}
-    next::Vector{C}
-
-    Buffer(::Type{C}, ::Type{H}) where {C,H} = new{C}(ntuple(_ -> zeros(C, nbits(H) + 2), 2)...)
 end
 
 
@@ -136,38 +128,52 @@ Life, `B3/S23`. Query the rule for a given `LifeGrid` with the [`rule`](@ref) fu
 
 A `LifeGrid` can be advanced one generation with the [`step!`](@ref) function.
 
-[`LifePattern`](@ref)s can be inserted into a `LifeGrid` via [`insert!`](@ref).
+[`LifePattern`](@ref)s and other matrices can be inserted into a `LifeGrid` with
+[`insert!`](@ref).
 
 See the extended help for [`LifeGame`](@ref) for implementation details.
 
 ---
 
-    LifeGrid(m, n; rule="B3/S23")
+    LifeGrid(m, n; rule="B3/S23", CType, HType)
 
 Return an m×n `LifeGrid` with no living cells and rule `rule`.
 
+`CType` determines the type used to store clusters of cells, which are N-2 cells packed into
+unsigned integers with N bits. It defaults to the smallest unsigned type that can fit the
+whole grid's width, `UInt64` if the grid is 31 or more cells wide. Since entire clusters are
+updated with bitwise operations even if some of the trailing bits are empty, the grid widths
+that make [`step!`](@ref) most efficient are `8*2ⁿ-2, n∈[0,3]`: 6, 14, 30, and multiples of
+62.
+
+Likewise, `HType` determines the type in which halos are stored, with similar defaults, up
+to `UInt64` if the grid is more than 32 bits tall. Since entire "chunks" (sections of each
+column with as many elements as `HType` has bits) are updated even if some trailing clusters
+are empty, grid heights of 8, 16, 32, and multiples of 64 will get the most performance out
+of [`step!`](@ref).
+
 ---
 
-    LifeGrid(grid::AbstractMatrix; rule="B3/S23")
+    LifeGrid(grid::AbstractMatrix; rule="B3/S23", CType, HType)
 
 Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 
 True or non-zero values indicate living cells; false or zero values indicate dead cells.
 """
 struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
+    # See the help message for `updatecolumn!` for an explanation of these members.
     height::Int64
     width::Int64
     grid::Matrix{CType}
     halos::Halos{HType}
     buffers::Vector{Vector{CType}}
 
-    # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(
         m::Integer,
         n::Integer;
-        rule::AbstractString="B3/S23",
-        CType::Type{<:Unsigned}=smallestuint(n + 2),
-        HType::Type{<:Unsigned}=smallestuint(m),
+        rule::AbstractString = "B3/S23",
+        CType::Type{<:Unsigned} = smallestuint(n + 2),
+        HType::Type{<:Unsigned} = smallestuint(m),
     )
         # Halos
         haloheight = cld(m, nbits(HType))

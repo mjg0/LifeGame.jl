@@ -36,14 +36,20 @@ See the extended help for an overview of `LifeGame`'s implementation.
 
 ## `LifeGrid` implementation
 
-The fundamental unit of a `LifeGrid` is the **cluster**, a row of 62 cells represented by a
-single `UInt64`; the two extra bits at the beginning and end of the cluster are **halo
-cells**, which hold the first and last cells of the clusters to the right and left,
-respectively, for numerical convenience. Zero padding is applied to each edge of the backing
-array, also for numerical convenience. Inter-iteration halos are stored in packed matrices.
-The storage backing a 200×300 `LifeGrid` is thus a 202×7 `Matrix{UInt64}` plus a few much
-smaller matrices. This means that large grids can be stored efficiently: a 100,000×100,000
-cell `LifeGrid` occupies 1.3 GiB of memory.
+The fundamental unit of a `LifeGrid` is the **cluster**, usually a row of 62 cells
+represented by a single `UInt64`; the two extra bits at the beginning and end of the cluster
+are **halo cells**, which hold the first and last cells of the clusters to the right and
+left, respectively, for numerical convenience. Clusters can be smaller unsigned integers;
+for example, a 6x6 `LifeGrid` has clusters of type `UInt8` by default.
+
+Inter-iteration halos are stored in packed matrices. A *chunk* of a grid is a portion of a
+column of clusters of height equal to the number of bits in the each element of these
+matrices. Whole chunks are updated simultaneously, so most grids will have some extra rows
+to ensure a height the number of bits in the halo type divides evenly.
+
+As an example, the storage backing a 200×300 `LifeGrid` is thus a 256×5 `Matrix{UInt64}`,
+plus a few much smaller matrices. This means that large grids can be stored efficiently:
+a 100,000×100,000 cell `LifeGrid` occupies 1.3 GiB of memory.
 
 ## `step!` implementation
 

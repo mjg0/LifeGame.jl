@@ -1,4 +1,4 @@
-export step!
+export step!, serial, parallel
 
 
 
@@ -132,89 +132,124 @@ updatehalos!(::LifeGrid{R,C,H,Tall,false}, args...) where {R,C,H,Tall} = nothing
 
 
 
-# disable_polyester_threads is noticeably expensive for small grids, @batch_if allays that
-abstract type ThreadingMode end
-struct Serial <: ThreadingMode end
-struct Parallel <: ThreadingMode end
-macro batch_if(mode, loop)
-    return esc(quote
-        if $mode === Parallel
-            @batch $loop
-        elseif $mode === Serial
-            $loop
-        else
-            throw(ArgumentError("expected Serial or Parallel"))
-        end
-    end)
+"""
+    updatecolumn!(lg::LifeGrid, J, tid=1)
+
+Update the `J`th column of `lg.grid` in place.
+
+`tid` is used to deconflict buffer use between threads; no two instances of `updatecolumn!`
+should ever have the same `tid` simultaneously.
+
+# Extended help
+
+Several arrays are involved in the update of a column of clusters:
+
+- `lg.grid`: the main piece of `lg`, a matrix of clusters, unsigned integers whose packed
+  bits each represent a single cell. Each of these clusters represents a portion of a row.
+  It's logically divided into chunks, with each chunk being of length equal to the number of
+  bits in `lg`'s halos. For large grids, with both cluster and halo types set to `UInt64`, a
+  chunk is 64 `UInt64`s long and represents a 64×62 cell section of the logical grid.
+- `lg.halos`: a struct containing 4 matrices, each with as many elements as `lg` has chunks.
+  There are left and right "incoming" and left and right "outgoing" halos. At the end of
+  [`step!`](@ref), the incoming and outgoing halos are swapped.
+- `lg.buffers`: several vectors, each the size of a chunk in `lg.grid` plus padding cells at
+  the begining and end. There are enough of these buffers for each thread to use two.
+
+The update for the `(I, J)`th chunk of `lg` proceeds as follows, ignoring minor nuances and
+cases at the boundary:
+
+1. The buffer representing the next chunk takes on the values from the `(I, J+1)`th chunk of
+   `lg.grid`, with the clusters' halo bits updated from the incoming left and right halos.
+2. The `(I, J)`th chunk of `lg.grid` has its clusters fully updated, reading from the buffer
+   representing the current chunk, which had its halo bits correctly set last iteration.
+3. The outgoing halos are computed from the bits in the newly updated `(I, J)`th chunk of
+   `lg.grid` and stored in anticipation of the next call to `step!`.
+"""
+Base.@propagate_inbounds @inline function updatecolumn!(
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    J::Integer,
+    threadid = 1,
+) where {R,C,H,Tall,Wide}
+    # Select two unique buffers
+    currentbuffer = lg.buffers[2*threadid-1]
+    nextbuffer = lg.buffers[2*threadid]
+
+    # Initialize the first buffer and the carry variable
+    updatebuffers!(currentbuffer, lg, 1, J)
+    previous = zero(C)
+
+    # Loop over all the the last chunk in this column
+    Irange = axes(lg.halos.currentleft, 1)
+    for I = first(Irange):(last(Irange)-1)
+        # Skip one chunk ahead to update the next buffer
+        currentbuffer[begin] = previous
+        updatebuffers!(nextbuffer, lg, I + 1, J)
+        currentbuffer[end] = nextbuffer[2]
+
+        # Update this chunk from currentbuffer
+        updategridchunk!(lg, currentbuffer, I, J)
+
+        # Calculate halos based off of the update
+        updatehalos!(lg, I, J)
+
+        # Switch buffers
+        previous = currentbuffer[end-1]
+        currentbuffer, nextbuffer = nextbuffer, currentbuffer
+    end
+
+    # Update the first and last cells in currentbuffer
+    currentbuffer[begin] = previous
+    currentbuffer[end] = zero(C)
+
+    # Update the last chunk
+    updategridchunk!(lg, currentbuffer, last(Irange), J)
+
+    # Last halos in this column
+    updatehalos!(lg, last(Irange), J)
+
+    return nothing
 end
 
 
 
+# @batch is noticeably expensive for small grids, this allows that to be avoided
+abstract type ThreadingMode end
+struct serial <: ThreadingMode end
+struct parallel <: ThreadingMode end
+
+
+
 """
-    step!(lg::LifeGrid)
-    step!(lg::LifeGrid, threadmode::Symbol)
+    step!(lg::LifeGrid, threadmode)
 
 Update `lg` one generation according to the [`rule`](@ref) associated with it.
 
 All cells outside of the grid boundary are fixed at zero.
 
-`threadmode` can be `:serial` or `:parallel`. By default, it's `:parallel` only if the grid
-backing `lg` has multiple columns.
+`threadmode` can be `serial` or `parallel`. By default, it's `parallel` if the grid backing
+`lg` has multiple columns.
 """
-function step!(
+@inline function step!(
     lg::LifeGrid{R,C,H,Tall,Wide},
     ::Type{Par},
 ) where {R,C,H,Tall,Wide,Par<:ThreadingMode}
-    # Get iteration bounds
-    I1, I2 = 1, size(lg.halos.currentleft, 1)
+    # Only parallelize if there's a need
+    if Wide && Par === parallel
+        # Manual thread bounds so buffers don't get mixed
+        nthreads = min(Threads.nthreads(), size(lg.grid, 2))
+        colsperthread = cld(size(lg.grid, 2), nthreads)
 
-    # @batch doesn't like "end"
-    bufflen = nbits(H) + 2
-
-    # Manual thread bounds so buffers don't get mixed
-    nthreads = min(Threads.nthreads(), size(lg.grid, 2))
-    colsperthread = cld(size(lg.grid, 2), nthreads)
-
-    @inbounds @batch_if Par for tid in 1:nthreads
-        J1 = colsperthread * (tid - 1) + 1
-        J2 = min(colsperthread * tid, size(lg.grid, 2))
-
-        for J in J1:J2
-            # Select two unique buffers
-            tid = Threads.threadid()
-            currentbuffer = lg.buffers[2*tid-1]
-            nextbuffer = lg.buffers[2*tid]
-
-            # Initialize the first buffer
-            updatebuffers!(currentbuffer, lg, 1, J)
-
-            previous = zero(C)
-            for I = I1:(I2-1)
-                # Skip one chunk ahead to update the next buffer
-                currentbuffer[1] = previous
-                updatebuffers!(nextbuffer, lg, I + 1, J)
-                currentbuffer[bufflen] = nextbuffer[2]
-
-                # Update this chunk from currentbuffer
-                updategridchunk!(lg, currentbuffer, I, J)
-
-                # Calculate halos based off of the update
-                updatehalos!(lg, I, J)
-
-                # Switch buffers and 
-                previous = currentbuffer[bufflen-1]
-                currentbuffer, nextbuffer = nextbuffer, currentbuffer
+        # Outer loop over threads, inner over columns
+        @inbounds @batch for tid = 1:nthreads
+            J1 = colsperthread * (tid - 1) + 1
+            J2 = min(colsperthread * tid, size(lg.grid, 2))
+            for J = J1:J2
+                updatecolumn!(lg, J, tid)
             end
-
-            # Update the first and last cells in currentbuffer
-            currentbuffer[1] = previous
-            currentbuffer[bufflen] = zero(C)
-
-            # Update the last chunk
-            updategridchunk!(lg, currentbuffer, I2, J)
-
-            # Last halos in this column
-            updatehalos!(lg, I2, J)
+        end
+    else
+        @inbounds for J in axes(lg.grid, 2)
+            updatecolumn!(lg, J)
         end
     end
 
@@ -225,14 +260,4 @@ function step!(
     return lg
 end
 
-function step!(lg::LifeGrid{R,C,H,Tall,Wide}, threadmode::Symbol) where {R,C,H,Tall,Wide}
-    if !Wide || threadmode === :serial
-        return step!(lg, Serial)
-    elseif threadmode === :parallel
-        return step!(lg, Parallel)
-    else
-        throw(ArgumentError("threadmode must be either :serial or :parallel"))
-    end
-end
-
-step!(lg::LifeGrid) = step!(lg, :parallel)
+step!(lg::LifeGrid) = step!(lg, parallel)
