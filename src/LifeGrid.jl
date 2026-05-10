@@ -175,7 +175,8 @@ struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
         halos = Halos(HType, haloheight, halowidth)
 
         # Buffers
-        buffers = [Buffer(CType, HType) for _ = 1:Threads.nthreads()]
+        nbuffers = min(Threads.nthreads(), halowidth)
+        buffers = [Buffer(CType, HType) for _ = 1:nbuffers]
 
         # Clusters
         gridheight = nbits(HType) * haloheight # store extra rows for even chunk sizes

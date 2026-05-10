@@ -170,7 +170,11 @@ Base.@propagate_inbounds @inline function updatebuffers!(
         lbit = C(lhalo >> (nbits(H) - k) & one(H)) << (nbits(C) - 1)
         rbit = C(rhalo >> (nbits(H) - k) & one(H))
 
-        nbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
+        if Wide
+            nbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
+        else
+            nbuf[k+1] = chunk[k] & centermask
+        end
     end
     #else
     # If there are no halos that require updating, a copy is all that's needed
