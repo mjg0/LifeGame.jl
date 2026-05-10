@@ -32,7 +32,7 @@ bit4    = 0b00000000    # 0 0 0 0   eights place
 @inline function bitsums(above, current, below)
     # Bitwise half and full adders, returning a sum and a remainder
     halfadder(x, y) = x ⊻ y, x & y
-    fulladder(x, y, z) = x ⊻ y ⊻ z, x&y | x&z | y&z
+    fulladder(x, y, z) = x ⊻ y ⊻ z, x & y | x & z | y & z
 
     # Sums and remainders of each column
     middlesum, middlerem = halfadder(above, below) # excludes the middle cell
@@ -83,7 +83,7 @@ end
 
 
 """
-    updatedcluster(above::Integer, current::Integer, below::Integer, ::LifeRule{B, S})
+    updatedcluster(above::T, current::T, below::T, ::LifeRule{B, S}) where T<:Unsigned
 
 Update and return `current` given adjacent clusters `above` and `below` using bit-twiddling.
 
@@ -115,11 +115,11 @@ LifeGame.updatedcluster(above, current, below,
                         ::LifeGame.LifeRule{LifeGame.Rule(1, 2, 3), LifeGame.Rule(4, 5)})
 ```
 
-`above`, `current`, and `below` are "clusters": 64-bit unsigned integers representing rows
-of 62 living cells, with a single cell of padding at each end to allow single bitshifts not
-to roll relevant cells off of the edges. `above` is the cluster above `current`, and `below`
-is the cluster below. `updatedcluster` returns a single 64-bit unsingned integer containing
-the 62 cells (the first and last bits are ignored) of `current` stepped forward one
+`above`, `current`, and `below` are "clusters": unsigned integers representing rows of
+living cells, with a single cell of padding at each end to allow a single bitshift not to
+roll relevant cells off the edges. A `UInt64` cluster, for example, represents a row of 62
+cells. `above` is the cluster above `current`, and `below` is the cluster below.
+`updatedcluster` returns a single unsigned with the cells of `current` stepped forward one
 generation.
 
 `LifeGame.bitsums` will be helpful for most specializations. It takes `above`, `current`,

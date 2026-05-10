@@ -156,7 +156,7 @@ Several arrays are involved in the update of a column of clusters:
   the begining and end. There are enough of these buffers for each thread to use two.
 
 The update for the `(I, J)`th chunk of `lg` proceeds as follows, ignoring minor nuances and
-cases at the boundary:
+special cases at the boundary:
 
 1. The buffer representing the next chunk takes on the values from the `(I, J+1)`th chunk of
    `lg.grid`, with the clusters' halo bits updated from the incoming left and right halos.

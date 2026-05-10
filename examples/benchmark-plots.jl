@@ -9,11 +9,11 @@ using LifeGame, Plots, BenchmarkTools
 
 
 # Return step! cell updates per nanosecond for each side length in sidelengths
-function benchmarkstep(sidelengths, par)
+function benchmarkstep(sidelengths, threadmode)
     # Warm up the CPU for a minute
     t = time()
     while time()-t < 60
-        step!(LifeGrid(10_000, 10_000), par ? parallel : serial)
+        step!(LifeGrid(10_000, 10_000), threadmode)
     end
 
     return [
@@ -22,7 +22,7 @@ function benchmarkstep(sidelengths, par)
             GC.gc()
 
             # Create the grid, allowing each core some work if par
-            lg = if par
+            lg = if threadmode == parallel
                 w = N/Threads.nthreads()
                 CType = w <= 6 ? UInt8 : w <= 14 ? UInt16 : w <= 30 ? UInt32 : UInt64
                 LifeGrid(N, N, CType = CType)
@@ -31,7 +31,7 @@ function benchmarkstep(sidelengths, par)
             end
 
             # Get benchmark results
-            result = @benchmark step!($lg, $par ? parallel : parallel)
+            result = @benchmark step!($lg, $threadmode)
 
             # Return cells per ns
             N^2/mean(result.times)
