@@ -159,7 +159,7 @@ struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
     width::Int64
     grid::Matrix{CType}
     halos::Halos{HType}
-    buffers::Vector{Buffer{CType}}
+    buffers::Vector{Vector{CType}}
 
     # The backing array and vectors are padded, with zero cells surrounding each edge
     function LifeGrid(
@@ -175,8 +175,8 @@ struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
         halos = Halos(HType, haloheight, halowidth)
 
         # Buffers
-        nbuffers = min(Threads.nthreads(), halowidth)
-        buffers = [Buffer(CType, HType) for _ = 1:nbuffers]
+        nbuffers = 2 * min(Threads.nthreads(), halowidth)
+        buffers = [zeros(CType, nbits(HType) + 2) for _ = 1:nbuffers]
 
         # Clusters
         gridheight = nbits(HType) * haloheight # store extra rows for even chunk sizes
