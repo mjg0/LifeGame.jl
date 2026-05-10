@@ -219,7 +219,9 @@ Base.@propagate_inbounds @inline function indexlifegrid(
     j,
 ) where {R,C,H}
     I = i
-    J, shift = divrem(j-1, nbits(C)-2).+1
+    #J, shift = divrem(j-1, nbits(C)-2).+1
+    J = (j - 1) ÷ (nbits(C) - 2) + 1
+    shift = (j - 1) % (nbits(C) - 2) + 1
 
     return I, J, shift
 end

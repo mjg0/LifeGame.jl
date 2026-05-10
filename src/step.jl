@@ -70,28 +70,32 @@ function step!(
     I1, I2 = 1, size(lg.halos.currentleft, 1)
     J1, J2 = 1, size(lg.halos.currentleft, 2)
 
+    bufflen = nbits(H) + 2
+
     @inbounds @batch_if Par for J = J1:J2
         buffer = lg.buffers[Threads.threadid()]
 
-        updatebuffers!(buffer, lg, 1, J)
-        # grid[1,J] -> buffer[1,J]
+        above = zero(C)
+
+        updatebuffers!(buffer.current, lg, 1, J)
 
         for I = I1:(I2-1)
-            updatebuffers!(buffer, lg, I + 1, J)
-            # grid[I,J], buffer[I,J] -> buffer[I,J], next[I+1,J]
+            buffer.current[1] = above
+            updatebuffers!(buffer.next, lg, I + 1, J)
+            buffer.current[bufflen] = buffer.next[2]
 
             updategridchunk!(lg, buffer, I, J)
-            # buffer[I,J] -> grid[I,J]
 
             updatehalos!(lg, I, J)
-            # grid[I,J] -> halos[I,J]
+            
+            above = buffer.current[bufflen-1]
+            swapbuffers!(buffer)
         end
 
-        swapbuffers!(buffer)
+        buffer.current[1] = above
+        buffer.current[bufflen] = zero(C)
 
-        #buffer.current, buffer.next = buffer.next, buffer.current
         updategridchunk!(lg, buffer, I2, J)
-        # buffer[I,J] -> grid[I,J]
 
         updatehalos!(lg, I2, J)
     end
@@ -135,47 +139,48 @@ end
 
 
 """
-Begin state: buffer.next has the previous iteration's results
+Begin state: buffer.next has the previous iteration's result
+
 End state: buffer.current has this iteration's result
 
 Reads from lg.grid, lg.halos, and buffer.next, writes to buffer.current and buffer.next; swaps buffer.{current,next}
 """
 Base.@propagate_inbounds @inline function updatebuffers!(
-    buffer::Buffer{C},
+    buffer, #::Buffer{C},
     lg::LifeGrid{R,C,H,Tall,Wide},
     I::Integer,
     J::Integer,
 ) where {R,C,H,Tall,Wide}
     # Convenience variables
     chunk = gridchunk(lg, I, J)
-    cbuf = buffer.current
-    nbuf = buffer.next
+    #cbuf = buffer.current
+    nbuf = buffer #.next
 
     # Incoming halos are the ones from adjacent columns
     lhalo = J == 1 ? zero(C) : lg.halos.currentright[I, J-1]
     rhalo = J == size(lg.grid, 2) ? zero(C) : lg.halos.currentleft[I, J+1]
 
     # Before overwriting it, store the last real element of cbuf
-    cbuf[begin] = ifelse(I == 1, zero(C), cbuf[end-1])
+    #nbuf[begin] = ifelse(I == 1, zero(C), cbuf[end-1])
 
     #if Wide
-        # Apply lhalo and rhalo to chunk, storing the results in nbuf
-        @simd for k = 1:nbits(H)
-            centermask = ~(lowbit(C) | highbit(C)) # all cells but the outermost two on
-            lbit = C(lhalo >> (nbits(H) - k) & one(H)) << (nbits(C) - 1)
-            rbit = C(rhalo >> (nbits(H) - k) & one(H))
+    # Apply lhalo and rhalo to chunk, storing the results in nbuf
+    @simd for k = 1:nbits(H)
+        centermask = ~(lowbit(C) | highbit(C)) # all cells but the outermost two on
+        lbit = C(lhalo >> (nbits(H) - k) & one(H)) << (nbits(C) - 1)
+        rbit = C(rhalo >> (nbits(H) - k) & one(H))
 
-            nbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
-        end
+        nbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
+    end
     #else
-        # If there are no halos that require updating, a copy is all that's needed
-        #nbuf[begin+1:end-1] .= chunk
+    # If there are no halos that require updating, a copy is all that's needed
+    #nbuf[begin+1:end-1] .= chunk
     #end
 
     # Get the first real element of nbuf in preparation for the next iteration
-    cbuf[end] = ifelse(I == gridheight(lg), zero(C), cbuf[begin+1])
+    #nbuf[end] = ifelse(I == gridheight(lg), zero(C), cbuf[begin+1])
 
-    buffer.current, buffer.next = buffer.next, buffer.current
+    #buffer.current, buffer.next = buffer.next, buffer.current
 
     return nothing
 end
@@ -212,7 +217,7 @@ Base.@propagate_inbounds @inline function updategridchunk!(
 
     # Zero out trailing rows
     if I == gridheight(lg)
-        lg.grid[lg.height+2, J] = zero(C)
+        lg.grid[lg.height+1, J] = zero(C)
     end
 
     return nothing
