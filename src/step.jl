@@ -1,4 +1,4 @@
-export step!, Serial, Parallel
+export step!
 
 
 
@@ -16,31 +16,6 @@ macro batch_if(mode, loop)
             throw(ArgumentError("expected Serial or Parallel"))
         end
     end)
-end
-
-
-
-"""
-    stepraw!(lg::LifeGrid)
-
-Advance `lg` by one generation in place and return it.
-
-There are 3 sets of matrices involved in updating `lg`:
-
-1. `lg.data`:
-
-Each column is split into chunks of length equal to the number of bits in the halos.
-Boundaries are special cases, but the rest of the update descends through each column thus:
-
-1. The following chunk's clusters are placed into a buffer with their halo bits updated
-1. The current chunk's clusters are updated from the previous iteration's buffer
-1. The newly updated chunk's halo bits are extracted for future iterations
-"""
-
-
-
-function swapbuffers!(buffers)
-    buffers.current, buffers.next = buffers.next, buffers.current
 end
 
 
@@ -68,46 +43,55 @@ function step!(
 ) where {R,C,H,Tall,Wide,Par<:ThreadingMode}
     # Get iteration bounds
     I1, I2 = 1, size(lg.halos.currentleft, 1)
-    J1, J2 = 1, size(lg.halos.currentleft, 2)
 
     # @batch doesn't like "end"
     bufflen = nbits(H) + 2
 
-    @inbounds @batch_if Par for J = J1:J2
-        # Select two unique buffers
-        tid = Threads.threadid()
-        currentbuffer, nextbuffer = lg.buffers[2*tid-1:2*tid]
+    # Manual thread bounds so buffers don't get mixed
+    nthreads = min(Threads.nthreads(), size(lg.grid, 2))
+    colsperthread = cld(size(lg.grid, 2), nthreads)
 
-        # Initialize the first buffer
-        updatebuffers!(currentbuffer, lg, 1, J)
+    @inbounds @batch_if Par for tid in 1:nthreads
+        J1 = colsperthread * (tid - 1) + 1
+        J2 = min(colsperthread * tid, size(lg.grid, 2))
+        J = J1:J2
+        for J in J1:J2
+            # Select two unique buffers
+            tid = Threads.threadid()
+            currentbuffer = lg.buffers[2*tid-1]
+            nextbuffer = lg.buffers[2*tid]
 
-        previous = zero(C)
-        for I = I1:(I2-1)
-            # Skip one step ahead to the next buffer
+            # Initialize the first buffer
+            updatebuffers!(currentbuffer, lg, 1, J)
+
+            previous = zero(C)
+            for I = I1:(I2-1)
+                # Skip one step ahead to the next buffer
+                currentbuffer[1] = previous
+                updatebuffers!(nextbuffer, lg, I + 1, J)
+                currentbuffer[bufflen] = nextbuffer[2]
+
+                # Update this chunk from currentbuffer
+                updategridchunk!(lg, currentbuffer, I, J)
+
+                # Calculate halos based off of the update
+                updatehalos!(lg, I, J)
+
+                # Switch buffers and 
+                previous = currentbuffer[bufflen-1]
+                currentbuffer, nextbuffer = nextbuffer, currentbuffer
+            end
+
+            # Update the first and last cells in currentbuffer
             currentbuffer[1] = previous
-            updatebuffers!(nextbuffer, lg, I + 1, J)
-            currentbuffer[bufflen] = nextbuffer[2]
+            currentbuffer[bufflen] = zero(C)
 
-            # Update this chunk from currentbuffer
-            updategridchunk!(lg, currentbuffer, I, J)
+            # Update the last chunk
+            updategridchunk!(lg, currentbuffer, I2, J)
 
-            # Calculate halos based off of the update
-            updatehalos!(lg, I, J)
-
-            # Switch buffers and 
-            previous = currentbuffer[bufflen-1]
-            currentbuffer, nextbuffer = nextbuffer, currentbuffer
+            # Last halos in this column
+            updatehalos!(lg, I2, J)
         end
-
-        # Update the first and last cells in currentbuffer
-        currentbuffer[1] = previous
-        currentbuffer[bufflen] = zero(C)
-
-        # Update the last chunk
-        updategridchunk!(lg, currentbuffer, I2, J)
-
-        # Last halos in this column
-        updatehalos!(lg, I2, J)
     end
 
     # Swap halos
@@ -117,8 +101,8 @@ function step!(
     return lg
 end
 
-function step!(lg::LifeGrid, threadmode::Symbol)
-    if threadmode === :serial
+function step!(lg::LifeGrid{R,C,H,Tall,Wide}, threadmode::Symbol) where {R,C,H,Tall,Wide}
+    if !Wide || threadmode === :serial
         return step!(lg, Serial)
     elseif threadmode === :parallel
         return step!(lg, Parallel)
@@ -127,16 +111,10 @@ function step!(lg::LifeGrid, threadmode::Symbol)
     end
 end
 
-step!(lg::LifeGrid) = step!(lg, size(lg.grid, 2) > 3 ? Parallel : Serial)
+step!(lg::LifeGrid) = step!(lg, :parallel)
 
 
 
-# CONFIRMED
-gridheight(lg::LifeGrid) = size(lg.halos.currentleft, 1)
-
-
-
-# CONFIRMED
 Base.@propagate_inbounds @inline function gridchunk(
     lg::LifeGrid{R,C,H,Tall,Wide},
     I,
@@ -168,7 +146,6 @@ Base.@propagate_inbounds @inline function updatebuffers!(
     lhalo = J == 1 ? zero(C) : lg.halos.currentright[I, J-1]
     rhalo = J == size(lg.grid, 2) ? zero(C) : lg.halos.currentleft[I, J+1]
 
-    #if Wide
     # Apply lhalo and rhalo to chunk, storing the results in buffer
     @simd for k = 1:nbits(H)
         centermask = ~(lowbit(C) | highbit(C)) # all cells but the outermost two on
@@ -181,15 +158,6 @@ Base.@propagate_inbounds @inline function updatebuffers!(
             buffer[k+1] = chunk[k] & centermask
         end
     end
-    #else
-    # If there are no halos that require updating, a copy is all that's needed
-    #nbuf[begin+1:end-1] .= chunk
-    #end
-
-    # Get the first real element of nbuf in preparation for the next iteration
-    #nbuf[end] = ifelse(I == gridheight(lg), zero(C), cbuf[begin+1])
-
-    #buffer.current, buffer.next = buffer.next, buffer.current
 
     return nothing
 end
@@ -225,7 +193,7 @@ Base.@propagate_inbounds @inline function updategridchunk!(
     end
 
     # Zero out trailing rows
-    if I == gridheight(lg) && size(lg.grid, 1) > lg.height
+    if I == size(lg.halos.currentleft, 1) && size(lg.grid, 1) > lg.height
         lg.grid[lg.height+1, J] = zero(C)
     end
 
@@ -267,125 +235,3 @@ end
 
 # No need for halo updates on single-column grids
 updatehalos!(::LifeGrid{R,C,H,Tall,false}, args...) where {R,C,H,Tall} = nothing
-
-
-
-#Base.@propagate_inbounds @inline function updatehalos!(
-#    out::AbstractVector{T},
-#    in::AbstractVector{T},
-#    lhalo::H,
-#    rhalo::H,
-#) where {T,H}
-#    centermask = ~(lowbit(T) | highbit(T))
-#
-#    @simd for k = 1:nbits(H)
-#        lbit = T(lhalo >> (nbits(H) - k) & one(H)) << (nbits(T) - 1)
-#        rbit = T(rhalo >> (nbits(H) - k) & one(H))
-#
-#        out[k+1] = (in[k] & centermask) | lbit | rbit
-#    end
-#end
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#"""
-#
-#`out` is 2 longer than `in` and doesn't get its first or last cells updated
-#"""
-#Base.@propagate_inbounds @inline function updatehalos!(
-#    out::AbstractVector{T},
-#    in::AbstractVector{T},
-#    lhalo::H,
-#    rhalo::H,
-#) where {T,H}
-#    centermask = ~(lowbit(T) | highbit(T))
-#
-#    @simd for k = 1:nbits(H)
-#        lbit = T(lhalo >> (nbits(H) - k) & one(H)) << (nbits(T) - 1)
-#        rbit = T(rhalo >> (nbits(H) - k) & one(H))
-#
-#        out[k+1] = (in[k] & centermask) | lbit | rbit
-#    end
-#end
-#
-#
-#
-#
-#
-#Base.@propagate_inbounds @inline function updatehalos!(lg::LifeGame{R,C,H,Wide,Tall}, I::Integer, J::Integer) where {R,C,H,Wide,Tall}
-#    centermask = ~(lowbit(T) | highbit(T))
-#
-#    chunk = gridchunk(lg, I, J)
-#    buffer = lg.buffers.current
-#
-#    if Wide
-#        lhalo = lg.halos.currentright[I,J]
-#        rhalo = lg.halos.currentleft[I,J]
-#
-#        @simd for k = 1:nbits(H)
-#            lbit = T(lhalo >> (nbits(H) - k) & one(H)) << (nbits(T) - 1)
-#            rbit = T(rhalo >> (nbits(H) - k) & one(H))
-#
-#            buffer[k+1] = (chunk[k] & centermask) | lbit | rbit
-#        end
-#    else
-#        buffer[begin+1:end-1]
-#    end
-#end
-#
-#
-#
-#
-#"""
-#
-#`in` should be two elements longer than `out`
-#"""
-#Base.@propagate_inbounds @inline function updategridchunk!(
-#    out::AbstractVector,
-#    in::AbstractVector,
-#    rule::R,
-#    ::Type{H},
-#) where {R,H}
-#    @simd for i = 1:(8*sizeof(H))
-#        out[i] = updatedcluster(in[i], in[i+1], in[i+2], rule)
-#    end
-#end
-#
-#
-#
-#
-#
-#
-#Base.@propagate_inbounds @inline function zerotrailing!(
-#    cells::AbstractVector,
-#    shift,
-#    ::Type{H},
-#) where {H}
-#    @simd for i = 1:(8*sizeof(H))
-#        cells[i] = (cells[i] >> shift) << shift
-#    end
-#end
-#
