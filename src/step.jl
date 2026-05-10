@@ -2,44 +2,6 @@ export step!, Serial, Parallel
 
 
 
-"""
-    updatedchunkhalos(chunk::AbstractVector, ::Type{H})
-
-Return the outgoing left and right halo cells of `chunk` as packed bits in two `H`s.
-
-The second bit in the first element of `chunk` goes into the top bit of the left halo, the
-second bit of the next element into the second bit of the left halo, etc. Likewise, the
-second from the last bit in the first element of `chunk` goes into the top bit of the right
-halo, etc. `chunk` must thus be of length `8*sizeof(H)`.
-"""
-Base.@propagate_inbounds @inline function updatedchunkhalos(
-    chunk::AbstractVector{C},
-    ::Type{H},
-) where {C,H}
-    @boundscheck if length(chunk) != nbits(H)
-        throw(ArgumentError("chunk must be of length 8*sizeof($H)"))
-    end
-
-    lhalo = zero(H)
-    rhalo = zero(H)
-
-    for k = 1:nbits(H)
-        # Get this cluster's halos
-        lshift = nbits(C) - 2
-        rshift = 1
-        lbit = H((chunk[k] >> lshift) & one(C))
-        rbit = H((chunk[k] >> rshift) & one(C))
-
-        # Update lhalo and rhalo at this iteration's bit
-        lhalo |= lbit << (nbits(H) - k)
-        rhalo |= rbit << (nbits(H) - k)
-    end
-
-    return lhalo, rhalo
-end
-
-
-
 # disable_polyester_threads is noticeably expensive for small grids, @batch_if allays that
 abstract type ThreadingMode end
 struct Serial <: ThreadingMode end
@@ -77,7 +39,7 @@ Boundaries are special cases, but the rest of the update descends through each c
 
 
 
-function swapbuffers(buffers)
+function swapbuffers!(buffers)
     buffers.current, buffers.next = buffers.next, buffers.current
 end
 
@@ -105,8 +67,8 @@ function step!(
     ::Type{Par},
 ) where {R,C,H,Tall,Wide,Par<:ThreadingMode}
     # Get iteration bounds
-    I1, I2 = 1, gridheight(lg)
-    J1, J2 = 1, gridheight(lg) # compensate for ghost columns at edges
+    I1, I2 = 1, size(lg.halos.currentleft, 1)
+    J1, J2 = 1, size(lg.halos.currentleft, 2)
 
     @inbounds @batch_if Par for J = J1:J2
         buffer = lg.buffers[Threads.threadid()]
@@ -125,7 +87,7 @@ function step!(
             # grid[I,J] -> halos[I,J]
         end
 
-        swapbuffers(buffer)
+        swapbuffers!(buffer)
 
         #buffer.current, buffer.next = buffer.next, buffer.current
         updategridchunk!(lg, buffer, I2, J)
@@ -155,19 +117,19 @@ step!(lg::LifeGrid) = step!(lg, size(lg.grid, 2) > 3 ? Parallel : Serial)
 
 
 
+# CONFIRMED
 gridheight(lg::LifeGrid) = size(lg.halos.currentleft, 1)
 
-gridwidth(lg::LifeGrid) = size(lg.halos.currentleft, 2) - 2
 
 
-
+# CONFIRMED
 Base.@propagate_inbounds @inline function gridchunk(
     lg::LifeGrid{R,C,H,Tall,Wide},
     I,
     J,
 ) where {R,C,H,Tall,Wide}
-    i = (I - 1) * nbits(H) + 2
-    return view(lg.grid, i:(i+nbits(H)-1), J + 1)
+    i = (I - 1) * nbits(H) + 1
+    return view(lg.grid, i:(i+nbits(H)-1), J)
 end
 
 
@@ -188,11 +150,13 @@ Base.@propagate_inbounds @inline function updatebuffers!(
     chunk = gridchunk(lg, I, J)
     cbuf = buffer.current
     nbuf = buffer.next
-    lhalo = lg.halos.currentright[I, J]
-    rhalo = lg.halos.currentleft[I, J+2]
+
+    # Incoming halos are the ones from adjacent columns
+    lhalo = J == 1 ? zero(C) : lg.halos.currentright[I, J-1]
+    rhalo = J == size(lg.grid, 2) ? zero(C) : lg.halos.currentleft[I, J+1]
 
     # Before overwriting it, store the last real element of cbuf
-    nbuf[begin] = ifelse(I == 1, zero(C), cbuf[end-1])
+    cbuf[begin] = ifelse(I == 1, zero(C), cbuf[end-1])
 
     #if Wide
         # Apply lhalo and rhalo to chunk, storing the results in nbuf
@@ -201,15 +165,15 @@ Base.@propagate_inbounds @inline function updatebuffers!(
             lbit = C(lhalo >> (nbits(H) - k) & one(H)) << (nbits(C) - 1)
             rbit = C(rhalo >> (nbits(H) - k) & one(H))
 
-            cbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
+            nbuf[k+1] = (chunk[k] & centermask) | lbit | rbit
         end
     #else
         # If there are no halos that require updating, a copy is all that's needed
-        cbuf[(begin+1):(end-1)] .= chunk
+        #nbuf[begin+1:end-1] .= chunk
     #end
 
     # Get the first real element of nbuf in preparation for the next iteration
-    nbuf[end] = ifelse(I == gridheight(lg), zero(C), cbuf[begin+1])
+    cbuf[end] = ifelse(I == gridheight(lg), zero(C), cbuf[begin+1])
 
     buffer.current, buffer.next = buffer.next, buffer.current
 
@@ -236,13 +200,13 @@ Base.@propagate_inbounds @inline function updategridchunk!(
     end
 
     # Zero out trailing columns
-    if J == gridwidth(lg)-1
+    if J == size(lg.grid, 2)
         # How many bits to zero out
         n = mod(-size(lg, 2), nbits(C) - 2) + 1
 
         # Roll off n bits for each cluster
-        @simd for i = 1:nbits(H)
-            chunk[i] = (chunk[i] >> n) << n
+        @simd for k = 1:nbits(H)
+            chunk[k] = (chunk[k] >> n) << n
         end
     end
 
@@ -281,12 +245,13 @@ Base.@propagate_inbounds @inline function updatehalos!(
         rhalo |= rbit << (nbits(H) - k)
     end
 
-    lg.halos.nextleft[I, J+1] = lhalo
-    lg.halos.nextright[I, J+1] = rhalo
+    lg.halos.nextleft[I, J] = lhalo
+    lg.halos.nextright[I, J] = rhalo
 
     return nothing
 end
 
+# No need for halo updates on single-column grids
 updatehalos!(::LifeGrid{R,C,H,Tall,false}, args...) where {R,C,H,Tall} = nothing
 
 

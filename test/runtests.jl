@@ -125,7 +125,7 @@ end
             lg[i, j] = 1
             lg[i, j] = true
             # Ensure that both the underlying value and the index are correct
-            @test lg.grid[I+1, J+1] == value
+            @test lg.grid[I, J] == value
             @test lg[i, j] == true
         end
     end

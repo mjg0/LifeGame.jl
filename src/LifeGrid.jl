@@ -70,7 +70,7 @@ struct LifeRule{Birth,Survival}
 end
 
 function Base.show(io::IO, ::LifeRule{B,S}) where {B,S}
-    rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init = "")
+    rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init="")
     print(io, "B$(rulestr(B))/S$(rulestr(S))")
 end
 
@@ -99,7 +99,7 @@ mutable struct Buffer{C}
     current::Vector{C}
     next::Vector{C}
 
-    Buffer(::Type{C}, ::Type{H}) where {C, H} = new{C}(ntuple(_ -> zeros(C, nbits(H) + 2), 2)...)
+    Buffer(::Type{C}, ::Type{H}) where {C,H} = new{C}(ntuple(_ -> zeros(C, nbits(H) + 2), 2)...)
 end
 
 
@@ -165,26 +165,26 @@ struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
     function LifeGrid(
         m::Integer,
         n::Integer;
-        rule::AbstractString = "B3/S23",
-        CType::Type{<:Unsigned} = smallestuint(n + 2),
-        HType::Type{<:Unsigned} = smallestuint(m),
+        rule::AbstractString="B3/S23",
+        CType::Type{<:Unsigned}=smallestuint(n + 2),
+        HType::Type{<:Unsigned}=smallestuint(m),
     )
         # Halos
         haloheight = cld(m, nbits(HType))
-        halowidth = cld(n, nbits(CType) - 2) + 2
+        halowidth = cld(n, nbits(CType) - 2)
         halos = Halos(HType, haloheight, halowidth)
 
         # Buffers
         buffers = [Buffer(CType, HType) for _ = 1:Threads.nthreads()]
 
         # Clusters
-        gridheight = nbits(HType) * haloheight + 2 # store extra rows for even chunk sizes
+        gridheight = nbits(HType) * haloheight # store extra rows for even chunk sizes
         gridwidth = halowidth
         grid = zeros(CType, gridheight, gridwidth)
 
         # Size parameters
         Tall = haloheight > 1
-        Wide = halowidth > 3
+        Wide = halowidth > 1
 
         return new{LifeRule(rule),CType,HType,Tall,Wide}(m, n, grid, halos, buffers)
     end
@@ -218,9 +218,8 @@ Base.@propagate_inbounds @inline function indexlifegrid(
     i,
     j,
 ) where {R,C,H}
-    I = i + 1 # skip padding column
-    J = (j - 1) ÷ (nbits(C) - 2) + 2
-    shift = (j - 1) % (nbits(C) - 2) + 1
+    I = i
+    J, shift = divrem(j-1, nbits(C)-2).+1
 
     return I, J, shift
 end
@@ -253,7 +252,7 @@ Base.@propagate_inbounds @inline function indexhalos(
     I, J, _ = indexlifegrid(lg, i, j)
 
     # The index in the halo array
-    hidx = CartesianIndex((I - 2) ÷ nbits(H) + 1, J)
+    hidx = CartesianIndex((I - 1) ÷ nbits(H) + 1, J)
 
     # A single-bit mask with the appropriate shift
     k = (I - 2) % nbits(H) + 1
