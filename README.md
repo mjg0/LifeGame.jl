@@ -21,10 +21,10 @@ lg = LifeGrid(35, 35)
 insert!(lg, 11, 11, LifePatterns.pulsar)
 
 # Put gliders at each corner, each closer to the pulsar by one cell
-insert!(lg,  1,  1, LifePatterns.glider)
-insert!(lg, 32,  1, LifePatterns.glider[end:-1:begin,:])
-insert!(lg,  2, 32, LifePatterns.glider[:,end:-1:begin])
-insert!(lg, 31, 32, LifePatterns.glider[end:-1:begin,end:-1:begin])
+insert!(lg,  1,  1, LifePatterns.glider1)
+insert!(lg, 32,  1, LifePatterns.glider6)
+insert!(lg,  2, 32, LifePatterns.glider2)
+insert!(lg, 31, 32, LifePatterns.glider5)
 
 # Animate the resultant simulation
 @gif for _ in 1:300
