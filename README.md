@@ -85,13 +85,15 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 ## Fast
 
-`LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on modern hardware. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes with 4 Julia threads on a laptop with an AMD 7640U:
+`LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on any modern hardware, and exceeding a trillion on fast server chips. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes by `step!` with 1 and 4 Julia threads on a laptop with an AMD 7640U:
 
 ![Benchmark results, large](img/benchmark-results-large.png)
 
+`step!` makes good choices about whether to run with multiple threads for small and large cases, but for grids between 62 and a couple hundred cells wide it's worth testing whether your specific case benefits from threading. Use `step!(lg, serial)` to run the serial algorithm, or `step!(lg, parallel)` for the parallel algorithm.
+
 **<details><summary>More</summary>**
 
-Such performance is attained by packing 62 cells into 64-bit operands and updating them simultaneously using bitwise operations; see the extended help for `LifeGrid`, `LifeGame.updatedcluster`, and `LifeGame.stepraw!` for algorithm details.
+Such performance is attained by packing 62 cells into 64-bit operands and updating them simultaneously using bitwise operations; see the extended help for `LifeGrid`, `LifeGame.updatedcluster`, and `LifeGame.updatecolumn!` for algorithm details.
 
 Due to this packing, you'll see significantly better performance for even multiples of 62 at small sizes:
 

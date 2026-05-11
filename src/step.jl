@@ -133,12 +133,12 @@ updatehalos!(::LifeGrid{R,C,H,Tall,false}, args...) where {R,C,H,Tall} = nothing
 
 
 """
-    updatecolumn!(lg::LifeGrid, J, tid=1)
+    updatecolumn!(lg::LifeGrid, J, threadid=1)
 
 Update the `J`th column of `lg.grid` in place.
 
-`tid` is used to deconflict buffer use between threads; no two instances of `updatecolumn!`
-should ever have the same `tid` simultaneously.
+`threadid` is used to deconflict buffer use between threads; no two instances of
+`updatecolumn!` should ever have the same `threadid` simultaneously.
 
 # Extended help
 
