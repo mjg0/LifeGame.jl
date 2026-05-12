@@ -80,6 +80,8 @@ include("utils.jl")
 
 include("LifeGrid.jl")
 
+include("io.jl")
+
 include("updatedcluster.jl")
 
 include("step.jl")

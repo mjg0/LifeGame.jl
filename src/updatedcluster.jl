@@ -60,7 +60,13 @@ Return a bitmask indicating which cells will be alive in the next generation.
 The bits that remain alive are determined according to the bitwise sum of neighbor cells
 represented by `bit*` (see [`bitsums`](@ref)) and the provided [`Rule`](@ref).
 """
-@generated function alivebits(bit1::T, bit2::T, bit3::T, bit4::T, ::Rule{N}) where {T,N}
+@generated function alivebits(
+    bit1::T,
+    bit2::T,
+    bit3::T,
+    bit4::T,
+    ::Type{Rule{N}},
+) where {T,N}
     # "On" bits for possible sums of 1 through 8
     onbits = (
         :(bit1 & ~bit2 & ~bit3 & ~bit4), # 1: 1st bit
@@ -146,7 +152,7 @@ function LifeGame.updatedcluster(above, current, below,
 end
 ```
 """
-function updatedcluster(above, current, below, ::LifeRule{B,S}) where {B,S}
+function updatedcluster(above, current, below, ::Type{LifeRule{B,S}}) where {B,S}
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
     # Update current according to the survival and birth rules

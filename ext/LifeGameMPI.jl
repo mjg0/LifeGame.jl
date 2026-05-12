@@ -39,7 +39,7 @@ end
 
 
 
-function LifeGame.MPILifeGrid(m::Integer, n::Integer; rule="B3/S23")
+function LifeGame.MPILifeGrid(m::Integer, n::Integer; rule = "B3/S23")
     # Ensure MPI initialization
     if !MPI.Initialized()
         MPI.Init()
@@ -50,7 +50,7 @@ function LifeGame.MPILifeGrid(m::Integer, n::Integer; rule="B3/S23")
     M = lastrow - firstrow + 1
 
     # Internal LifeGrid, with an extra rows at the top and bottom
-    lg = LifeGrid(M + 2, n; rule=rule)
+    lg = LifeGrid(M + 2, n; rule = rule)
 
     aboverecvbuf = MPI.Buffer(@view lg.grid[begin, :])
     belowrecvbuf = MPI.Buffer(@view lg.grid[end, :])
@@ -115,14 +115,14 @@ function LifeGame.step!(lg::LifeGridMPI)
 
     # Exchange halos with the process above
     if commrank() > 0 && firstrow ≤ lg.height
-        MPI.Isend(lg.abovesendbuf, COMM, reqs[1]; dest=commrank() - 1, tag=0)
-        MPI.Irecv!(lg.aboverecvbuf, COMM, reqs[2]; source=commrank() - 1, tag=1)
+        MPI.Isend(lg.abovesendbuf, COMM, reqs[1]; dest = commrank() - 1, tag = 0)
+        MPI.Irecv!(lg.aboverecvbuf, COMM, reqs[2]; source = commrank() - 1, tag = 1)
     end
 
     # Exchange halos with the process below
     if commrank() < commsize()-1 && lastrow < lg.height
-        MPI.Isend(lg.belowsendbuf, COMM, reqs[3]; dest=commrank() + 1, tag=1)
-        MPI.Irecv!(lg.belowrecvbuf, COMM, reqs[4]; source=commrank() + 1, tag=0)
+        MPI.Isend(lg.belowsendbuf, COMM, reqs[3]; dest = commrank() + 1, tag = 1)
+        MPI.Irecv!(lg.belowrecvbuf, COMM, reqs[4]; source = commrank() + 1, tag = 0)
     end
 
     # Wait for syncs to finish

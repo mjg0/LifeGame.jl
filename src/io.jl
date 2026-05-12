@@ -7,15 +7,14 @@ clustertype(::LifeGrid{R,C,H,Tall,Wide}) where {R,C,H,Tall,Wide} = C
 
 
 
-function Base.write(io::IO, ::LifeRule{B,S}) where {B,S}
-    write(io, B)
-    write(io, S)
+function Base.write(io::IO, ::Type{LifeRule{Rule{B},Rule{S}}}) where {B,S}
+    return write(io, B) + write(io, S)
 end
 
 function LifeRule(io::IO)
     B = read(io, UInt8)
     S = read(io, UInt8)
-    return LifeRule{B,S}()
+    return LifeRule{B,S}
 end
 
 
@@ -23,7 +22,7 @@ end
 function Base.write(io::IO, lg::LifeGrid)
     # I/O format is always 64-bit cluster size
     if clustertype(lg) != UInt64
-        return write(io, LifeGrid(lg; rule=rule(lg), CType=UInt64))
+        return write(io, LifeGrid(lg; rule = rule(lg), CType = UInt64))
     end
 
     # Write magic bytes
@@ -60,7 +59,7 @@ function LifeGrid(io::IO; kw...)
     R = rule(read(io, String))
 
     # Construct the grid to be returned
-    lg = LifeGrid(m, n; rule=R, CType=UInt64)
+    lg = LifeGrid(m, n; rule = R, CType = UInt64)
 
     # Read in cells
     read!(io, lg.grid)
@@ -68,7 +67,7 @@ function LifeGrid(io::IO; kw...)
 
     # Return an appropriately sized LifeGrid
     return if size(lg, 2) < nbits(UInt32) - 2
-        LifeGrid(lg; rule=R)
+        LifeGrid(lg; rule = R)
     else
         lg
     end

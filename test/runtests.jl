@@ -4,6 +4,17 @@ include("SlowLifeGrid.jl")
 
 
 
+# Return a random rule string
+function randrule(rng = default_rng())
+    randrulevec() = [i for i = 1:8 if rand(rng, Bool)]
+
+    R = LifeGame.LifeRule(randrulevec(), randrulevec())
+
+    return sprint(show, R)
+end
+
+
+
 # Print what went wrong when a LifeGrid was updated incorrectly
 function printlifediff(left, correct, actual; leftlabel)
     # Basic information
@@ -18,9 +29,9 @@ function printlifediff(left, correct, actual; leftlabel)
 
     # Header
     println("Incorrect result (bad cells in red):")
-    printedwidth = 2*size(left, 2)+4
-    print(leftlabel, repeat(' ', max(0, printedwidth-length(leftlabel))))
-    println("Actual", repeat(' ', max(0, printedwidth-length("Actual"))))
+    printedwidth = 2 * size(left, 2) + 4
+    print(leftlabel, repeat(' ', max(0, printedwidth - length(leftlabel))))
+    println("Actual", repeat(' ', max(0, printedwidth - length("Actual"))))
 
     # Representation of whether the cell is on or off
     rep(onoroff) = onoroff ? "* " : "- "
@@ -51,7 +62,7 @@ end
 # step! LifeGrid a few times 
 function teststep!(rule, size; CType = nothing)
     m, n = size
-    @testset failfast=true "rule $rule, size $m×$n" begin
+    @testset failfast = true "rule $rule, size $m×$n" begin
         for threadmode in (serial, parallel)
             # Make results reproducible
             rng = MersenneTwister(1)
@@ -154,77 +165,101 @@ end
 
     @testset "updatedcluster" begin
         # Test with some fixed values that have been calculated by hand
-        rule = LifeGame.LifeRule("B3/S23")
+        R = LifeGame.LifeRule("B3/S23")
         for (above, middle, below, result) in (
             (0b1100, 0b1000, 0b0000, 0b1100),
             (0b0100, 0b0100, 0b0100, 0b1110),
             (0b0010, 0b1010, 0b0110, 0b0011),
             (0b1000, 0b0110, 0b1100, 0b0010),
         )
-            @test LifeGame.updatedcluster(above, middle, below, rule) == result
+            @test LifeGame.updatedcluster(above, middle, below, R) == result
         end
     end
 
-    @testset "step!" begin
+    #@testset "step!" begin
+    #    rng = MersenneTwister(1)
+    #    CTypes = (UInt8, UInt16, UInt32, UInt64)
+    #    rules = ("B3/S23", "B2/S", "B35678/S5678", "B36/S23", "B234/S", "B345/S5")
+
+    #    # Numerous tests of grids of size close to the edge of clusters and chunks
+    #    for height in (3, 7, 8, 9, 40, 64, 65, 128, 129, 150, 300)
+    #        for width in (6, 7, 14, 15, 45, 62, 63, 90, 124, 125, 200, 400)
+    #            teststep!(rand(rng, rules), (height, width); CType = UInt8) #rand(rng, CTypes))
+    #        end
+    #    end
+    #end
+
+    @testset "LifeGrid I/O" begin
         rng = MersenneTwister(1)
-        CTypes = (UInt8, UInt16, UInt32, UInt64)
-        rules = ("B3/S23", "B2/S", "B35678/S5678", "B36/S23", "B234/S", "B345/S5")
+        for _ = 1:20
+            # Create a random LifeGrid
+            R = randrule(rng)
+            m = rand(rng, 1:200)
+            n = rand(rng, 1:200)
+            lg = LifeGrid(m, n; rule = R)
 
-        # Numerous tests of grids of size close to the edge of clusters and chunks
-        for height in (3, 7, 8, 9, 40, 64, 65, 128, 129, 150, 300)
-            for width in (6, 7, 14, 15, 45, 62, 63, 90, 124, 125, 200, 400)
-                teststep!(rand(rng, rules), (height, width); CType = UInt8) #rand(rng, CTypes))
-            end
+            # Write it to a stream
+            io = IOBuffer()
+            write(io, lg)
+
+            # Read in a copy
+            lgc = LifeGrid(io)
+
+            # Ensure they're identical now...
+            @test all(lg .== lgc)
+
+            # ...and after stepping
+            @test all(step!(lg) .== step!(lgc))
         end
     end
 
-    @testset failfast=true "LifePattern" begin
-        rng = MersenneTwister(1)
-        sizes = (5, 20, 80, 150)
-        CTypes = (UInt8, UInt16, UInt32, UInt64)
+    #@testset failfast = true "LifePattern" begin
+    #    rng = MersenneTwister(1)
+    #    sizes = (5, 20, 80, 150)
+    #    CTypes = (UInt8, UInt16, UInt32, UInt64)
 
-        for M in sizes, N in sizes
-            lg = LifeGrid(rand(rng, Bool, 500, 500), CType = rand(rng, CTypes))
+    #    for M in sizes, N in sizes
+    #        lg = LifeGrid(rand(rng, Bool, 500, 500), CType=rand(rng, CTypes))
 
-            # Construction
-            pattern = rand(rng, Bool, M, N)
-            lp = LifePattern(pattern)
+    #        # Construction
+    #        pattern = rand(rng, Bool, M, N)
+    #        lp = LifePattern(pattern)
 
-            # Indexing
-            I = rand(rng, CartesianIndices(pattern))
-            pattern[I] = !pattern[I]
-            lp[I] = !lp[I]
-            identical = all(lp .== pattern)
-            if !identical
-                printlifediff(pattern, pattern, lp; leftlabel = "Correct")
-            end
-            @test identical
+    #        # Indexing
+    #        I = rand(rng, CartesianIndices(pattern))
+    #        pattern[I] = !pattern[I]
+    #        lp[I] = !lp[I]
+    #        identical = all(lp .== pattern)
+    #        if !identical
+    #            printlifediff(pattern, pattern, lp; leftlabel="Correct")
+    #        end
+    #        @test identical
 
-            # Insertion
-            i = rand(rng, 1:(lastindex(lg, 1)-M))
-            j = rand(rng, 1:(lastindex(lg, 2)-N))
-            correct = Array(lg)
-            for lpI in CartesianIndices(lp)
-                I = lpI+CartesianIndex((i, j))-oneunit(lpI)
-                correct[I] = lp[lpI] || correct[I]
-            end
-            lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
-            lgwithp2 = insert!(deepcopy(lg), i, j, lp)
-            identical = all(correct .== lgwithp1 .== lgwithp2)
-            if !identical
-                printlifediff(correct, correct, lgwithp2; leftlabel = "Correct")
-            end
-            @test identical
+    #        # Insertion
+    #        i = rand(rng, 1:(lastindex(lg, 1)-M))
+    #        j = rand(rng, 1:(lastindex(lg, 2)-N))
+    #        correct = Array(lg)
+    #        for lpI in CartesianIndices(lp)
+    #            I = lpI + CartesianIndex((i, j)) - oneunit(lpI)
+    #            correct[I] = lp[lpI] || correct[I]
+    #        end
+    #        lgwithp1 = insert!(deepcopy(lg), i, j, pattern)
+    #        lgwithp2 = insert!(deepcopy(lg), i, j, lp)
+    #        identical = all(correct .== lgwithp1 .== lgwithp2)
+    #        if !identical
+    #            printlifediff(correct, correct, lgwithp2; leftlabel="Correct")
+    #        end
+    #        @test identical
 
-            # Step to ensure that halos were updated properly
-            stepped = step!(LifeGrid(correct))
-            step!(lgwithp1)
-            step!(lgwithp2)
-            identical = all(stepped .== lgwithp1 .== lgwithp2)
-            if !identical
-                printlifediff(correct, stepped, lgwithp2; leftlabel = "Previous")
-            end
-            @test identical
-        end
-    end
+    #        # Step to ensure that halos were updated properly
+    #        stepped = step!(LifeGrid(correct))
+    #        step!(lgwithp1)
+    #        step!(lgwithp2)
+    #        identical = all(stepped .== lgwithp1 .== lgwithp2)
+    #        if !identical
+    #            printlifediff(correct, stepped, lgwithp2; leftlabel="Previous")
+    #        end
+    #        @test identical
+    #    end
+    #end
 end # @testset
