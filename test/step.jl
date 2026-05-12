@@ -3,7 +3,7 @@
 
     # First run a small test that will print a helpful message on failure
     lgsmall = LifeGrid(rand(rng, Bool, 15, 20); CType=UInt8, HType=UInt8)
-    slowsmall = SlowLifeGrid(lgsmall)
+    slowsmall = SlowLifeGrid(lgsmall; rule=sprint(show, rule(lgsmall)))
     for _ in 1:10
         prev = deepcopy(lgsmall)
         step!(lgsmall)
@@ -19,7 +19,7 @@
     for _ in 1:100
         lg = randlifegrid(rng)
         threadmode = rand(rng, (serial, parallel))
-        slow = SlowLifeGrid(lg)
+        slow = SlowLifeGrid(lg; rule=sprint(show, rule(lg)))
         for _ in 1:10 # stepping costs almost nothing compared to all the compiling
             @test all(step!(lg, threadmode) .== step!(slow))
         end

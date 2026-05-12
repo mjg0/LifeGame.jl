@@ -6,6 +6,7 @@ clustertype(::LifeGrid{R,C,H,Tall,Wide}) where {R,C,H,Tall,Wide} = C
 
 
 
+# Read and write LifeRules to/from streams
 function Base.write(io::IO, ::Type{LifeRule{Rule{B},Rule{S}}}) where {B,S}
     written = write(io, B)
     written += write(io, S)
@@ -20,6 +21,9 @@ end
 
 
 
+"""
+TODO: docs
+"""
 function Base.write(io::IO, lg::LifeGrid)
     # I/O format is always 64-bit cluster size
     if clustertype(lg) != UInt64

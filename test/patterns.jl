@@ -1,6 +1,7 @@
+"Make sure that correct and pattern are identical"
 function checkpattern(correct, pattern)
     identical = all(correct .== pattern)
-    if !identical && max(size(correct)...) < 30
+    if !identical
         printlifediff(correct, correct, pattern; leftlabel="Correct")
     end
     @test identical
@@ -13,7 +14,7 @@ end
 
     for _ in 1:20
         # Create a LifeGrid, a pattern grid, and a LifePattern
-        lg = randlifegrid(rng; minsize=(4, 4), maxsize=(25, 25))
+        lg = randlifegrid(rng; minsize=(4, 4))
         pattern = rand(rng, Bool, rand(rng, axes(lg, 1)), rand(rng, axes(lg, 2)))
         lp = LifePattern(pattern)
 
@@ -25,8 +26,8 @@ end
 
         # Check that insertion works
         m, n = size(pattern)
-        i = rand(rng, 1:(lastindex(lg, 1)-m))
-        j = rand(rng, 1:(lastindex(lg, 2)-n))
+        i = rand(rng, 1:(lastindex(lg, 1)-m+1))
+        j = rand(rng, 1:(lastindex(lg, 2)-n+1))
         correct = deepcopy(lg)
         for lpI in CartesianIndices(lp)
             I = lpI + CartesianIndex((i, j)) - oneunit(lpI)
@@ -37,12 +38,11 @@ end
         checkpattern(correct, lgp)
 
         # Check that stepping works after insertion
-        slow = SlowLifeGrid(lgp)
+        slow = SlowLifeGrid(lgp; rule=sprint(show, rule(lgp)))
         for _ in 1:10
-            checkpattern(slow, lgp)
             step!(lgp)
             step!(slow)
-            #@test all(step!(lgp) .== step!(slow))
+            checkpattern(slow, lgp)
         end
     end
 end

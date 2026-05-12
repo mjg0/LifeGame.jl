@@ -9,7 +9,7 @@ mutable struct SlowLifeGrid <: AbstractMatrix{Bool}
     birthsums::Vector{Int}    # list of neighbor sums that lead to cell birth
     survivalsums::Vector{Int} # list of neighbor sums that allow cell survival
 
-    function SlowLifeGrid(height, width; rule = "B3/S23")
+    function SlowLifeGrid(height, width; rule="B3/S23")
         birthsums, survivalsums = LifeGame.rulesums(LifeGame.LifeRule(rule))
         return new(zeros(height, width), zeros(height, width), birthsums, survivalsums)
     end
@@ -38,7 +38,7 @@ function LifeGame.step!(lg::SlowLifeGrid)
     region = CartesianIndices(lg.grid)
     @inbounds @simd for I in region
         # Sum the living neighbors of the current cell
-        neighborhood = max(first(region), I-oneunit(I)):min(last(region), I+oneunit(I))
+        neighborhood = max(first(region), I - oneunit(I)):min(last(region), I + oneunit(I))
         neighborsum = sum(@view lg.grid[neighborhood]) - lg.grid[I]
 
         survival = neighborsum in lg.survivalsums
