@@ -1,14 +1,15 @@
+const MAGIC_BYTES = 0x4546494C
 
 
-
-const MAGIC_BYTES = 0x4C494645
 
 clustertype(::LifeGrid{R,C,H,Tall,Wide}) where {R,C,H,Tall,Wide} = C
 
 
 
 function Base.write(io::IO, ::Type{LifeRule{Rule{B},Rule{S}}}) where {B,S}
-    return write(io, B) + write(io, S)
+    written = write(io, B)
+    written += write(io, S)
+    return written
 end
 
 function LifeRule(io::IO)
@@ -22,7 +23,7 @@ end
 function Base.write(io::IO, lg::LifeGrid)
     # I/O format is always 64-bit cluster size
     if clustertype(lg) != UInt64
-        return write(io, LifeGrid(lg; rule = rule(lg), CType = UInt64))
+        return write(io, LifeGrid(lg; rule = sprint(show, rule(lg)), CType = UInt64))
     end
 
     # Write magic bytes
@@ -35,9 +36,11 @@ function Base.write(io::IO, lg::LifeGrid)
     written += write(io, rule(lg))
 
     # Write grid, with halos masked to zero for uniformity
-    for cluster in lg.grid
-        masked = cluster & ~(highbit(UInt64) | lowbit(UInt64))
-        written += write(io, htol(masked))
+    for J in axes(lg.grid, 2)
+        for i in 1:lg.height
+            masked = lg.grid[i, J] & ~(highbit(UInt64) | lowbit(UInt64))
+            written += write(io, htol(masked))
+        end
     end
 
     return written
@@ -56,14 +59,17 @@ function LifeGrid(io::IO; kw...)
     n = ltoh(read(io, Int64))
 
     # Read in rule
-    R = rule(read(io, String))
+    R = sprint(show, LifeRule(io))
 
     # Construct the grid to be returned
     lg = LifeGrid(m, n; rule = R, CType = UInt64)
 
     # Read in cells
-    read!(io, lg.grid)
-    map!(ltoh, grid, grid)
+    for J in axes(lg.grid, 2)
+        for i in 1:m
+            lg.grid[i,J] = ltoh(read(io, UInt64))
+        end
+    end
 
     # Return an appropriately sized LifeGrid
     return if size(lg, 2) < nbits(UInt32) - 2

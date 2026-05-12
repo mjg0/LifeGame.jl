@@ -203,6 +203,7 @@ end
             write(io, lg)
 
             # Read in a copy
+            seekstart(io)
             lgc = LifeGrid(io)
 
             # Ensure they're identical now...
