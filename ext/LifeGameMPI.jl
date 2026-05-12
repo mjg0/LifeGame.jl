@@ -39,7 +39,7 @@ end
 
 
 
-function LifeGame.MPILifeGrid(m::Integer, n::Integer)
+function LifeGame.MPILifeGrid(m::Integer, n::Integer; rule="B3/S23")
     # Ensure MPI initialization
     if !MPI.Initialized()
         MPI.Init()
@@ -47,13 +47,15 @@ function LifeGame.MPILifeGrid(m::Integer, n::Integer)
 
     # Which columns will this process be in charge of?
     firstrow, lastrow = thisrankrows(m)
+    M = lastrow - firstrow + 1
 
-    lg = LifeGrid(lastrow - firstrow + 3, n) # Add two for buffer rows above and below
+    # Internal LifeGrid, with an extra rows at the top and bottom
+    lg = LifeGrid(M + 2, n; rule=rule)
 
-    aboverecvbuf = MPI.buffer(@view lg.grid[begin, :])
-    belowrecvbuf = MPI.buffer(@view lg.grid[end, :])
-    abovesendbuf = MPI.buffer(@view lg.grid[begin+1, :])
-    belowsendbuf = MPI.buffer(@view lg.grid[end-1, :])
+    aboverecvbuf = MPI.Buffer(@view lg.grid[begin, :])
+    belowrecvbuf = MPI.Buffer(@view lg.grid[end, :])
+    abovesendbuf = MPI.Buffer(@view lg.grid[begin+1, :])
+    belowsendbuf = MPI.Buffer(@view lg.grid[end-1, :])
 
     return LifeGridMPI{typeof(lg)}(
         lg,
@@ -66,8 +68,8 @@ function LifeGame.MPILifeGrid(m::Integer, n::Integer)
     )
 end
 
-function LifeGame.MPILifeGrid(grid::AbstractMatrix{T}) where {T<:Number}
-    lg = MPILifeGrid(size(grid)...)
+function LifeGame.MPILifeGrid(grid::AbstractMatrix{T}; kw...) where {T<:Number}
+    lg = MPILifeGrid(size(grid)...; kw...)
     lg .= grid .!= zero(T)
 end
 
@@ -75,14 +77,14 @@ end
 
 # AbstractArray interface for MPILifeGrid
 function Base.size(lg::LifeGridMPI)
-    return lg.height, size(lg, 2)
+    return lg.height, size(lg.lifegrid, 2)
 end
 
 Base.@propagate_inbounds function Base.getindex(lg::LifeGridMPI, i::Integer, j::Integer)
-    firstcol, lastcol = thisrankcolumns(lg.width)
+    firstrow, lastrow = thisrankrows(lg.height)
 
-    value = if j ∈ firstcol:lastcol
-        lg.grid[i+1, j-firstcol+1]
+    value = if i ∈ firstrow:lastrow
+        lg.lifegrid[i-firstrow+2, j]
     else
         false
     end
@@ -96,10 +98,10 @@ Base.@propagate_inbounds function Base.setindex!(
     i::Integer,
     j::Integer,
 )
-    firstcol, lastcol = thisrankcolumns(lg.width)
+    firstrow, lastrow = thisrankrows(lg.height)
 
-    if j ∈ firstcol:lastcol
-        lg.grid[i+1, j-firstcol+1] = value
+    if i ∈ firstrow:lastrow
+        lg.lifegrid[i-firstrow+1, j] = value
     end
 
     return lg
@@ -113,14 +115,14 @@ function LifeGame.step!(lg::LifeGridMPI)
 
     # Exchange halos with the process above
     if commrank() > 0 && firstrow ≤ lg.height
-        MPI.Isend(lg.abovesendbuf, COMM, reqs[1]; dest = commrank() - 1, tag = 0)
-        MPI.Irecv(lg.aboverecvbuf, COMM, reqs[2]; source = commrank() - 1, tag = 1)
+        MPI.Isend(lg.abovesendbuf, COMM, reqs[1]; dest=commrank() - 1, tag=0)
+        MPI.Irecv!(lg.aboverecvbuf, COMM, reqs[2]; source=commrank() - 1, tag=1)
     end
 
     # Exchange halos with the process below
-    if commrank() < commsize() && lastrow < lg.height
-        MPI.Isend(lg.belowsendbuf, COMM, reqs[3]; dest = commrank() + 1, tag = 1)
-        MPI.Irecv(lg.belowrecvbuf, COMM, reqs[4]; source = commrank() + 1, tag = 0)
+    if commrank() < commsize()-1 && lastrow < lg.height
+        MPI.Isend(lg.belowsendbuf, COMM, reqs[3]; dest=commrank() + 1, tag=1)
+        MPI.Irecv!(lg.belowrecvbuf, COMM, reqs[4]; source=commrank() + 1, tag=0)
     end
 
     # Wait for syncs to finish

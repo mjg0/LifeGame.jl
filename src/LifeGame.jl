@@ -88,6 +88,7 @@ include("LifePattern.jl")
 
 include("LifePatterns.jl")
 
+export MPILifeGrid
 MPILifeGrid() = throw(ArgumentError("MPILifeGrid must be initialized with a size or grid"))
 
 
