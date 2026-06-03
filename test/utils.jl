@@ -1,4 +1,8 @@
-"Return a random life rule string (e.g. 'B3/S23')"
+"""
+    randrule(rng=default_rng())
+
+Return a random life rule string (e.g. "B3/S23")
+"""
 function randrule(rng=default_rng())
     randrulevec() = [i for i = 1:8 if rand(rng, Bool)]
 
@@ -9,15 +13,19 @@ end
 
 
 
-"Return a random LifeGrid"
+"""
+    randlifegrid(rng=default_rng(); minsize=(1, 1), maxsize=(300, 300))
+
+Return a randomly initialized `LifeGrid` of random size with a random `LifeRule`.
+"""
 function randlifegrid(rng=default_rng(); minsize=(1, 1), maxsize=(300, 300))
-    R = randrule(rng)
-
     C, H = (rand(rng, (UInt8, UInt16, UInt32, UInt64)) for _ in 1:2)
+    lgsize = (rand(rng, smallest:biggest) for (smallest, biggest) in zip(minsize, maxsize))
 
-    lgsize = (rand(rng, a:b) for (a, b) in zip(minsize, maxsize))
+    lg = LifeGrid(lgsize...; rule=randrule(rng), CType=C, HType=H)
+    rand!(rng, lg)
 
-    return LifeGrid(lgsize...; rule=R, CType=C, HType=H)
+    return lg
 end
 
 

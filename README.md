@@ -41,7 +41,7 @@ You only really need to know 2 methods to use `LifeGame.jl`:
 
 - The constructor:
   - `LifeGame(m, n; rule="B3/S23")`: create an `m×n` grid devoid of life.
-  - `LifeGame(grid::AbstractMatrix; rule="B3/S23)`: create a grid from `grid`, where non-zero or true cells are alive.
+  - `LifeGame(grid::AbstractMatrix; rule="B3/S23")`: create a grid from `grid`, where non-zero or true cells are alive.
 - `step!(lifegrid)`: update `lifegrid` once.
 
 `LifeGrid`s are `AbstractArray`s, so you can index one as you would expect:
@@ -115,6 +115,6 @@ The plots in this section were generated with [`examples/benchmark-plots.jl`](ex
 
 - This style of implementation is amenable to GPU acceleration.
 
-- A sparse algorithm could be worthwhile
+- A sparse algorithm would be worthwhile
 
 **Issues and pull requests are welcome!**

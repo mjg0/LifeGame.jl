@@ -226,7 +226,6 @@ Base.@propagate_inbounds @inline function indexlifegrid(
     j,
 ) where {R,C,H}
     I = i
-    #J, shift = divrem(j-1, nbits(C)-2).+1
     J = (j - 1) ÷ (nbits(C) - 2) + 1
     shift = (j - 1) % (nbits(C) - 2) + 1
 
@@ -291,6 +290,46 @@ end
 
 
 
+"""
+    syncclusterhalos!(lg::LifeGrid, I, J)
+
+Update `lg`'s current halo matrices for the `(I, J)`th cluster of `lg.grid`.
+
+This should be called after directly mutating `lg.grid[I, J]` without using `setindex!`. It
+copies the first and last real cell bits of the cluster into `lg.halos.currentleft` and
+`lg.halos.currentright`.
+"""
+Base.@propagate_inbounds function syncclusterhalos!(
+    lg::LifeGrid{R,C,H,Tall,Wide},
+    I::Integer,
+    J::Integer,
+) where {R,C,H,Tall,Wide}
+    hidx = CartesianIndex((I - 1) ÷ nbits(H) + 1, J)
+    k = (I - 1) % nbits(H) + 1
+    hmask = one(H) << (nbits(H) - k)
+
+    cluster = lg.grid[I, J]
+
+    leftbit = (cluster >> (nbits(C) - 2)) & one(C)
+    rightbit = (cluster >> 1) & one(C)
+
+    lg.halos.currentleft[hidx] = ifelse(
+        leftbit == one(C),
+        lg.halos.currentleft[hidx] | hmask,
+        lg.halos.currentleft[hidx] & ~hmask,
+    )
+
+    lg.halos.currentright[hidx] = ifelse(
+        rightbit == one(C),
+        lg.halos.currentright[hidx] | hmask,
+        lg.halos.currentright[hidx] & ~hmask,
+    )
+
+    return nothing
+end
+
+
+
 # AbstractArray interface for LifeGrid
 Base.size(lg::LifeGrid) = lg.height, lg.width
 
@@ -317,16 +356,9 @@ Base.@propagate_inbounds function Base.setindex!(
     cluster = lg.grid[I, J]
     lg.grid[I, J] = ifelse(val != zero(val), cluster | cellmask, cluster & ~cellmask)
 
-    # Which halo needs to be updated?
-    hidx, hmask = indexhalos(lg, i, j)
-    halos = shift == 1 ? lg.halos.currentleft : lg.halos.currentright
-
-    # Update the halo if necessary
-    op = ifelse(val != zero(val), x -> x | hmask, x -> x & ~hmask)
-    if shift == 1
-        halos[hidx] = op(halos[hidx])
-    elseif shift == nbits(C) - 2
-        halos[hidx] = op(halos[hidx])
+    # Update halos if needed
+    if shift == 1 || shift == nbits(C) - 2
+        syncclusterhalos!(lg, I, J)
     end
 
     return val

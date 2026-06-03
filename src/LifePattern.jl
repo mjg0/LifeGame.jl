@@ -59,8 +59,6 @@ end
 
 Return an index and mask for retrieving a particular bit from `lp.data`.
 
-Returns a ``
-
 Use it thus:
 
 ```julia

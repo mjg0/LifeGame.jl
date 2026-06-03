@@ -21,32 +21,22 @@ end
 
 
 
-# Helpers for read and write functions
-
-
-
 """
     write(io::IO, lg::LifeGrid)
 
 Write `lg` to `io` as binary data.
 
-The format is as follows (all in binary, little-endian):
+The format is as follows (all in binary, little-endian where applicable):
 
 1. 4 magic bytes indicating a non-corrupted `LifeGrid` file/stream
 1. The size, 2 64-bit signed integers (height, then width)
 1. The rule, 2 bytes representing the birth and survival rules respectively
-1. The data grid underpinning `lg`'s cells, a series of 64-bit unsigned integers
+1. The data grid underpinning `lg`'s cells, packed bits in row-major order
 
-All `LifeGrid`s are converted to a cluster size of 64 bits before writing. This won't be a
-problem for normal use cases, but could cause a significant allocation if for some reason
-you have a large grid with 8-, 16-, or 32-bit clusters.
+The grid bits are packed with no padding between rows, so a row may begin mid-byte. The grid
+is written as 8-bit unsigned integers and is thus endianness-agnostic.
 """
 function Base.write(io::IO, lg::LifeGrid)
-    # I/O format is always 64-bit cluster size
-    if clustertype(lg) != UInt64
-        return write(io, LifeGrid(lg; rule = sprint(show, rule(lg)), CType = UInt64))
-    end
-
     # Write magic bytes
     written = write(io, htol(MAGIC_BYTES))
 
@@ -56,13 +46,20 @@ function Base.write(io::IO, lg::LifeGrid)
     # Write rule
     written += write(io, rule(lg))
 
-    # Write grid, row major, with halos masked to zero for uniformity
-    for i in 1:lg.height
-        for J in axes(lg.grid, 2)
-            masked = lg.grid[i, J] & ~(highbit(UInt64) | lowbit(UInt64))
-            written += write(io, htol(masked))
+    # Write grid
+    cellspercluster = nbits(eltype(lg.grid)) - 2
+    bitwriter(io; bufsize=min(cld(length(lg), 8), 1024^2)) do bw
+        @inbounds for i in axes(lg, 1)
+            # Write all but the last column
+            for j in 1:size(lg.grid, 2)-1
+                writebits!(bw, lg.grid[i, j] << 1, cellspercluster)
+            end
+            # Last column might have less cells
+            ncells = size(lg, 2) - (size(lg.grid, 2) - 1) * cellspercluster
+            writebits!(bw, lg.grid[i, end] << 1, ncells)
         end
     end
+    written += cld(length(lg), 8)
 
     return written
 end
@@ -79,7 +76,7 @@ See [`write`](@ref) for the binary format of a `LifeGrid`.
 function LifeGrid(io::IO; kw...)
     # Ensure the right "magic bytes"
     if ltoh(read(io, typeof(MAGIC_BYTES))) != ltoh(MAGIC_BYTES)
-        throw(ArgumentError("Invalid life game grid file: wrong magic bytes"))
+        throw(ArgumentError("Invalid life game grid stream: wrong magic bytes"))
     end
 
     # Read in size
@@ -90,19 +87,25 @@ function LifeGrid(io::IO; kw...)
     R = sprint(show, LifeRule(io))
 
     # Construct the grid to be returned
-    lg = LifeGrid(m, n; rule = R, CType = UInt64)
+    lg = LifeGrid(m, n; rule=R, kw...)
 
-    # Read in cells, row-major
-    for i in 1:m
-        for J in axes(lg.grid, 2)
-            lg.grid[i,J] = ltoh(read(io, UInt64))
+    # Read in the grid
+    cellspercluster = nbits(eltype(lg.grid)) - 2
+    bitreader(io; bufsize=min(cld(length(lg), 8), 1024^2), maxbits=length(lg)) do br
+        @inbounds for i in axes(lg, 1)
+            # Read all but the last column
+            for j in 1:size(lg.grid, 2)-1
+                cell = readbits!(br, eltype(lg.grid), cellspercluster)
+                lg.grid[i, j] = cell >> 1
+                syncclusterhalos!(lg, i, j)
+            end
+            # Last column might have less cells
+            ncells = size(lg, 2) - (size(lg.grid, 2) - 1) * cellspercluster
+            cell = readbits!(br, eltype(lg.grid), ncells)
+            lg.grid[i, end] = cell >> 1
+            syncclusterhalos!(lg, i, lastindex(lg.grid, 2))
         end
     end
 
-    # Return an appropriately sized LifeGrid
-    return if size(lg, 2) < nbits(UInt32) - 2
-        LifeGrid(lg; rule = R)
-    else
-        lg
-    end
+    return lg
 end
