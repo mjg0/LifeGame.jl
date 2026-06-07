@@ -67,7 +67,7 @@ Base.@propagate_inbounds @inline function updategridchunk!(
 
     # Update each cluster in chunk
     @simd for i = 1:nbits(H)
-        chunk[i] = updatedcluster(cbuf[i], cbuf[i+1], cbuf[i+2], R)
+        chunk[i] = updatedcluster(cbuf[i], cbuf[i+1], cbuf[i+2], R())
     end
 
     # Zero out trailing columns

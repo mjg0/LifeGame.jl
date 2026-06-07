@@ -12,6 +12,7 @@
         # Read in a copy
         seekstart(io)
         lgc = LifeGrid(io)
+        @test rule(lgc) == rule(lg)
 
         # Ensure they're identical now...
         @test all(lg .== lgc)

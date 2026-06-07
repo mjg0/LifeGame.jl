@@ -62,14 +62,14 @@ function LifeRule(rule::AbstractString)
     return LifeRule{
         Rule((parse(Int, c) for c in birthnumbers)...),
         Rule((parse(Int, c) for c in survivalnumbers)...),
-    }
+    }()
 end
 
 function LifeRule(b, s)
-    return LifeRule{Rule(b...),Rule(s...)}
+    return LifeRule{Rule(b...),Rule(s...)}()
 end
 
-function Base.show(io::IO, ::Type{LifeRule{B,S}}) where {B,S}
+function Base.show(io::IO, ::LifeRule{B,S}) where {B,S}
     rulestr(rule) = prod(["$i" for i in rulesums(rule)]; init = "")
     print(io, "B$(rulestr(B))/S$(rulestr(S))")
 end
@@ -160,7 +160,7 @@ Return a LifeGrid with cell values defined by `grid` with rule `rule`.
 
 True or non-zero values indicate living cells; false or zero values indicate dead cells.
 """
-struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
+struct LifeGrid{R,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
     # See the help message for `updatecolumn!` for an explanation of these members.
     height::Int64
     width::Int64
@@ -171,10 +171,13 @@ struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
     function LifeGrid(
         m::Integer,
         n::Integer;
-        rule::AbstractString = "B3/S23",
+        rule = "B3/S23",
         CType::Type{<:Unsigned} = smallestuint(n + 2),
         HType::Type{<:Unsigned} = smallestuint(m),
     )
+        # Normalize rule
+        rule = rule isa LifeRule ? rule : LifeRule(rule)
+
         # Halos
         haloheight = cld(m, nbits(HType))
         halowidth = cld(n, nbits(CType) - 2)
@@ -193,7 +196,7 @@ struct LifeGrid{LifeRule,CType,HType,Tall,Wide} <: AbstractMatrix{Bool}
         Tall = haloheight > 1
         Wide = halowidth > 1
 
-        return new{LifeRule(rule),CType,HType,Tall,Wide}(m, n, grid, halos, buffers)
+        return new{typeof(rule),CType,HType,Tall,Wide}(m, n, grid, halos, buffers)
     end
 
     function LifeGrid(grid::AbstractMatrix{T}; kw...) where {T<:Number}
@@ -371,7 +374,7 @@ end
 
 Return the simulation rule governing `lg`'s evolution.
 """
-rule(::LifeGrid{R}) where {R} = R
+rule(::LifeGrid{R,C,H,Tall,Wide}) where {R,C,H,Tall,Wide} = R()
 
 
 
@@ -390,6 +393,8 @@ tuple.
 """
 rulesums(N::Integer) = [i for i = 1:8 if N >> (i - 1) & 0x01 == 0x01]
 
-rulesums(::Type{Rule{N}}) where {N} = rulesums(N)
+rulesums(::Rule{N}) where {N} = rulesums(N)
+rulesums(::Type{R}) where {R<:Rule} = rulesums(R())
 
-rulesums(::Type{LifeRule{B,S}}) where {B,S} = rulesums(B), rulesums(S)
+rulesums(::LifeRule{B,S}) where {B,S} = rulesums(B), rulesums(S)
+rulesums(::Type{R}) where {R<:LifeRule} = rulesums(R())

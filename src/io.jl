@@ -7,7 +7,7 @@ clustertype(::LifeGrid{R,C,H,Tall,Wide}) where {R,C,H,Tall,Wide} = C
 
 
 # Read and write LifeRules to/from streams
-function Base.write(io::IO, ::Type{LifeRule{Rule{B},Rule{S}}}) where {B,S}
+function Base.write(io::IO, ::LifeRule{Rule{B},Rule{S}}) where {B,S}
     written = write(io, B)
     written += write(io, S)
     return written
@@ -16,7 +16,7 @@ end
 function LifeRule(io::IO)
     B = read(io, UInt8)
     S = read(io, UInt8)
-    return LifeRule{B,S}
+    return LifeRule{Rule{B},Rule{S}}()
 end
 
 
@@ -84,7 +84,7 @@ function LifeGrid(io::IO; kw...)
     n = ltoh(read(io, Int64))
 
     # Read in rule
-    R = sprint(show, LifeRule(io))
+    R = LifeRule(io)
 
     # Construct the grid to be returned
     lg = LifeGrid(m, n; rule=R, kw...)

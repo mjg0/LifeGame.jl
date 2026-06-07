@@ -51,3 +51,19 @@ function LifeGame.step!(lg::SlowLifeGrid)
     lg.grid, lg.next = lg.next, lg.grid
     return lg
 end
+
+
+
+# Insert a pattern into a SlowLifeGrid
+function Base.insert!(lg::SlowLifeGrid, I::CartesianIndex{2}, pattern)
+    for pI in CartesianIndices(pattern)
+        idx = pI + I - oneunit(pI)
+        lg[idx] = ifelse(pattern[pI] == zero(eltype(pattern)), lg[idx], true)
+    end
+
+    return lg
+end
+
+function Base.insert!(lg::SlowLifeGrid, i::Integer, j::Integer, pattern)
+    return insert!(lg, CartesianIndex((i, j)), pattern)
+end

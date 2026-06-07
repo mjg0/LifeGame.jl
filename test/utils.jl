@@ -1,28 +1,24 @@
 """
-    randrule(rng=default_rng())
-
-Return a random life rule string (e.g. "B3/S23")
-"""
-function randrule(rng=default_rng())
-    randrulevec() = [i for i = 1:8 if rand(rng, Bool)]
-
-    R = LifeGame.LifeRule(randrulevec(), randrulevec())
-
-    return sprint(show, R)
-end
-
-
-
-"""
-    randlifegrid(rng=default_rng(); minsize=(1, 1), maxsize=(300, 300))
+    randlifegrid(rng)
 
 Return a randomly initialized `LifeGrid` of random size with a random `LifeRule`.
 """
-function randlifegrid(rng=default_rng(); minsize=(1, 1), maxsize=(300, 300))
-    C, H = (rand(rng, (UInt8, UInt16, UInt32, UInt64)) for _ in 1:2)
-    lgsize = (rand(rng, smallest:biggest) for (smallest, biggest) in zip(minsize, maxsize))
+function randlifegrid(rng)
+    # Cluster and halo types
+    utypes = (UInt8, UInt16, UInt32, UInt64)
+    C = rand(rng, utypes)
+    H = rand(rng, utypes)
 
-    lg = LifeGrid(lgsize...; rule=randrule(rng), CType=C, HType=H)
+    # Cluster size, biased toward sizes likely to hit fencepost errors
+    gridsize = (rand(rng, (1, 2, 3, n-1, n, n+1, 2n-1, 2n, 2n+1, rand(rng, 3n:4n)))
+                for n in (8 * sizeof(H), 8 * sizeof(C) - 2))
+
+    # Rule
+    birth, survival = ntuple(_ -> LifeGame.Rule{rand(rng, UInt8)}, 2)
+    rule = LifeGame.LifeRule{birth,survival}()
+
+    # Build and randomize the LifeGrid
+    lg = LifeGrid(gridsize...; rule=repr(rule), CType=C, HType=H)
     rand!(rng, lg)
 
     return lg
@@ -30,8 +26,9 @@ end
 
 
 
+
 """
-    printlinediff(left, correct, actual; leftlabel)
+    printlifediff(left, correct, actual; leftlabel)
 
 Print highlighted differences between `correct` and `actual`
 
@@ -77,4 +74,33 @@ function printlifediff(left, correct, actual; leftlabel)
 
         println()
     end
+end
+
+
+
+"""
+    stepandcheck!(reference, grid, rng, mutate! = x -> nothing)
+
+`mutate!` `reference` and `grid`, `step!` them, and test that they remain identical.
+
+`mutate!` is a function that takes a grid as its argument and optionally mutates it.
+`reference` is the known correct grid, for which `mutate!` and `step!` must both work
+correctly. `grid` is the grid to be tested, and `rng` is a random number generator.
+"""
+function stepandcheck!(reference, grid, rng, mutate! = x -> nothing)
+    mutate!(reference)
+    before = deepcopy(reference)
+    step!(reference)
+
+    mutate!(grid)
+    threadmode = rand(rng, (serial, parallel))
+
+    step!(grid, threadmode)
+
+    correct = all(grid .== reference)
+    if !correct
+        println("Failure with rule $(rule(grid))")
+        printlifediff(before, reference, grid; leftlabel="Previous")
+    end
+    @test correct
 end

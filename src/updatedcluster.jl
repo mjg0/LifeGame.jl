@@ -152,7 +152,7 @@ function LifeGame.updatedcluster(above, current, below,
 end
 ```
 """
-function updatedcluster(above, current, below, ::Type{LifeRule{B,S}}) where {B,S}
+function updatedcluster(above, current, below, ::LifeRule{B,S}) where {B,S}
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
     # Update current according to the survival and birth rules

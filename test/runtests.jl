@@ -1,16 +1,17 @@
 using Test, Crayons, Random, LifeGame
 
-
-
-include("utils.jl")
-
 include("SlowLifeGrid.jl")
 
+
+
 @testset "LifeGame" begin
-    include("constructor.jl")
-    include("indexing.jl")
+    include("utils.jl")
+
     include("updatedcluster.jl")
-    include("step.jl")
+
+    include("constructors.jl")
+
+    include("mutators.jl")
+
     include("io.jl")
-    include("patterns.jl")
 end
