@@ -19,7 +19,11 @@ function randlifegrid(rng)
 
     # Build and randomize the LifeGrid
     lg = LifeGrid(gridsize...; rule=repr(rule), CType=C, HType=H)
-    rand!(rng, lg)
+    if rand(rng, Bool) # dense
+        rand!(rng, lg)
+    else # sparse
+        lg[rand(rng, CartesianIndices(lg))] = 1
+    end
 
     return lg
 end
@@ -94,8 +98,9 @@ function stepandcheck!(reference, grid, rng, mutate! = x -> nothing)
 
     mutate!(grid)
     threadmode = rand(rng, (serial, parallel))
+    sparsemode = rand(rng, (dense, sparse))
 
-    step!(grid, threadmode)
+    step!(grid, threadmode, sparsemode)
 
     correct = all(grid .== reference)
     if !correct

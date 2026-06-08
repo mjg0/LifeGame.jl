@@ -47,9 +47,9 @@ column of clusters of height equal to the number of bits in the each element of 
 matrices. Whole chunks are updated simultaneously, so most grids will have some extra rows
 to ensure a height the number of bits in the halo type divides evenly.
 
-As an example, the storage backing a 200×300 `LifeGrid` is thus a 256×5 `Matrix{UInt64}`,
-plus a few much smaller matrices. This means that large grids can be stored efficiently:
-a 100,000×100,000 cell `LifeGrid` occupies 1.3 GiB of memory.
+As an example, the storage backing a 200×300 `LifeGrid` is a 256×5 `Matrix{UInt64}`, plus a
+few much smaller matrices. This means that large grids can be stored efficiently: a
+100,000×100,000 cell `LifeGrid` occupies less than 1.4 GB of memory.
 
 ## `step!` implementation
 
@@ -78,7 +78,15 @@ using Polyester
 
 include("utils.jl")
 
+include("rules.jl")
+
+include("storage.jl")
+
 include("LifeGrid.jl")
+
+include("sparse.jl")
+
+include("indexing.jl")
 
 include("BitReaderWriter.jl")
 
@@ -88,7 +96,11 @@ include("updatedcluster.jl")
 
 include("step.jl")
 
+include("chunkupdate.jl")
+
 include("LifePattern.jl")
+
+include("insert.jl")
 
 include("LifePatterns.jl")
 

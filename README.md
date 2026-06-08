@@ -85,9 +85,11 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 ## Fast
 
-`LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on any modern hardware, and exceeding a trillion on fast server chips. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes by `step!` with 1 and 4 Julia threads on a laptop with an AMD 7640U:
+`LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on any reasonable modern hardware, and exceeding a trillion on fast server chips. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes (all with rule `B3/S23`) by `step!` with 1 and 4 Julia threads on a laptop with an AMD 7640U:
 
 ![Benchmark results, large](img/benchmark-results-large.png)
+
+The main lines correspond to the default `dense` algorithm, the dashed lines to the `sparse` algorithm. This chunkwise-sparse algorithm is more efficient for grids with inactive regions, and can be called with `step!(lg, sparse[, serial|parallel])`.
 
 `step!` makes good choices about whether to run with multiple threads for small and large cases, but for grids between 62 and a couple hundred cells wide it's worth testing whether your specific case benefits from threading. Use `step!(lg, serial)` to run the serial algorithm, or `step!(lg, parallel)` for the parallel algorithm.
 
@@ -114,7 +116,5 @@ The plots in this section were generated with [`examples/benchmark-plots.jl`](ex
 - Allowing for infinite grids by dynamically creating extra grids when cells cross into unmapped regions would be interesting, but [Hashlife](https://en.wikipedia.org/wiki/Hashlife) is probably a better choice for such use cases.
 
 - This style of implementation is amenable to GPU acceleration.
-
-- A sparse algorithm would be worthwhile
 
 **Issues and pull requests are welcome!**

@@ -150,7 +150,7 @@ mutable struct BitReader{I<:IO}
     readbits::Int64
 
     function BitReader(io::I; bufsize=1024^2, maxbits=typemax(Int64)) where {I<:IO}
-        br = new{I}(io, Vector{UInt8}(undef, 1024^2), 0, maxbits, 0)
+        br = new{I}(io, Vector{UInt8}(undef, bufsize), 0, maxbits, 0)
         refillbits!(br)
         return br
     end

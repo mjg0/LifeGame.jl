@@ -2,19 +2,24 @@ begin
     rng = MersenneTwister(1)
 
     N = 100
+    iters = 100
 
     grids = ntuple(_ -> randlifegrid(rng), N)
     references = ntuple(i -> SlowLifeGrid(grids[i]; rule=repr(rule(grids[i]))), N)
 
     @testset "step!" begin
-        for (grid, reference) in zip(grids, references), _ in 1:5
+        for (grid, reference) in zip(grids, references), _ in 1:iters
             stepandcheck!(reference, grid, rng)
         end
     end
 
     @testset "setindex!" begin
-        for (grid, reference) in zip(grids, references), _ in 1:5
-            indices = rand(rng, CartesianIndices(grid), cld(length(grid), 4))
+        for (grid, reference) in zip(grids, references), _ in 1:iters
+            indices = if rand(rng, Bool) # dense
+                rand(rng, CartesianIndices(grid), cld(length(grid), 4))
+            else # sparse
+                [rand(rng, CartesianIndices(grid))]
+            end
             mutate!(A) = for I in indices
                 A[I] = !A[I]
             end
@@ -24,7 +29,7 @@ begin
     end
 
     @testset "insert!" begin
-        for (grid, reference) in zip(grids, references), _ in 1:5
+        for (grid, reference) in zip(grids, references), _ in 1:iters
             M, N = size(grid)
             p = rand(rng, Bool, rand(rng, 1:M), rand(rng, 1:N))
             
