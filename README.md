@@ -48,8 +48,8 @@ You only need to know 2 methods to use `LifeGame.jl`:
 
 ```julia
 lg = LifeGrid([0 1 1 0
-                   1 0 0 1
-                   0 1 1 0])
+               1 0 0 1
+               0 1 1 0])
 lg[1, 1] # false
 lg[1, 2] # true
 lg[1, 3] = false # OK
@@ -67,13 +67,13 @@ The default `rule` is Conway's Game of Life (`B3/S23`).
 If you plan on inserting the same pattern many times into a `LifeGrid`, it is most efficient to create a `LifePattern` once then `insert!` it multiple times:
 
 ```julia
-mygrid = LifeGrid(1000, 2000)
-mypattern = LifePattern([1 0 1 0 1 1 1
-                         1 1 1 0 0 1 0
-                         1 0 1 0 1 1 1])
+lg = LifeGrid(1000, 2000)
+pattern = LifePattern([1 0 1 0 1 1 1
+                       1 1 1 0 0 1 0
+                       1 0 1 0 1 1 1])
 for _ in 1:100
     I = CartesianIndex((rand(100:900), rand(100:1900)))
-    insert!(mygrid, I, mypattern)
+    insert!(lg, I, pattern)
 end
 ```
 
