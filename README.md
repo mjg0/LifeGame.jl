@@ -1,8 +1,8 @@
 # LifeGame.jl
 
-`LifeGame.jl` is a simple, fast, threaded simulator for cellular automata like [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life). It is optimized for large, dense, high-entropy grids. Only fixed boundary conditions--considering all cells outside of the finite grid to be dead--are available [for now](#future-work).
+`LifeGame.jl` is a simple, fast, threaded simulator for cellular automata like [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life). It is optimized for large, dense, high-entropy grids. Currently, only fixed boundary conditions are supported--cells outside the finite grid are treated as dead.
 
-[Here](https://youtu.be/DehyzMiwDwY) is a [presentation](https://docs.google.com/presentation/d/1D52NkO1bAx7DJG9WCElswsvsZ4wDRSYU_7lufQqEku8/edit?usp=sharing) that I gave for a friend's students which explains some of the optimzation choices made when creating `LifeGame.jl`.
+[Here](https://youtu.be/DehyzMiwDwY) is a [presentation](https://docs.google.com/presentation/d/1D52NkO1bAx7DJG9WCElswsvsZ4wDRSYU_7lufQqEku8/edit?usp=sharing) that I gave for a friend's students to explain some of the optimization choices behind `LifeGame.jl`.
 
 ## Simple
 
@@ -37,26 +37,26 @@ end
 
 **<details><summary>More</summary>**
 
-You only really need to know 2 methods to use `LifeGame.jl`:
+You only need to know 2 methods to use `LifeGame.jl`:
 
 - The constructor:
-  - `LifeGame(m, n; rule="B3/S23")`: create an `m×n` grid devoid of life.
-  - `LifeGame(grid::AbstractMatrix; rule="B3/S23")`: create a grid from `grid`, where non-zero or true cells are alive.
-- `step!(lifegrid)`: update `lifegrid` once.
+  - `LifeGrid(m, n; rule="B3/S23")`: create an `m×n` grid devoid of life.
+  - `LifeGrid(grid::AbstractMatrix; rule="B3/S23")`: create a grid from `grid`, where non-zero or true cells are alive.
+- `step!(lg)`: update the `LifeGrid` `lg` once.
 
 `LifeGrid`s are `AbstractArray`s, so you can index one as you would expect:
 
 ```julia
-mygrid = LifeGrid([0 1 1 0
+lg = LifeGrid([0 1 1 0
                    1 0 0 1
                    0 1 1 0])
-mygrid[1, 1] # false
-mygrid[1, 2] # true
-mygrid[1, 3] = false # OK
-mygrid[1, 4] = 1 # also OK
+lg[1, 1] # false
+lg[1, 2] # true
+lg[1, 3] = false # OK
+lg[1, 4] = 1 # also OK
 ```
 
-Rules for the simulation's evolution are formatted as `Bm.../Sn...`, where `m...` and `n...` are non-delimited lists of neighbor sums for which cells are born or survive, respectively. A cells' neighbors are the 8 cells adjacent up, down, left, right, diagonally in each direction, so the sum can be anywhere from 1 to 8. As an example, a grid for simulating [highlife](https://en.wikipedia.org/wiki/Highlife_%28cellular_automaton%29) (for which 2 or 3 living neighbors lead to cell survival and 3 or 6 living neighbors lead to cell birth) can be created thus:
+Rules for the simulation's evolution are formatted as `Bm.../Sn...`, where `m...` and `n...` are non-delimited lists of neighbor sums for which cells are born or survive, respectively. A cell's neighbors are the 8 surrounding cells: up, down, left, right, and the four diagonals, so the sum can be anywhere from 0 to 8. As an example, a grid for simulating [highlife](https://en.wikipedia.org/wiki/Highlife_%28cellular_automaton%29) (for which 2 or 3 living neighbors lead to cell survival and 3 or 6 living neighbors lead to cell birth) can be created like this:
 
 ```julia
 highlifegrid = LifeGrid(200, 300; rule="B36/S23")
@@ -64,7 +64,7 @@ highlifegrid = LifeGrid(200, 300; rule="B36/S23")
 
 The default `rule` is Conway's Game of Life (`B3/S23`).
 
-If you plan on adding many of the same pattern into a `LifeGrid`, it is most efficient to create a `LifePattern` once then `insert!` it multiple times:
+If you plan on inserting the same pattern many times into a `LifeGrid`, it is most efficient to create a `LifePattern` once then `insert!` it multiple times:
 
 ```julia
 mygrid = LifeGrid(1000, 2000)
@@ -85,19 +85,19 @@ Some commonly used patterns are provided in the `LifePatterns` module.
 
 ## Fast
 
-`LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on any reasonable modern hardware, and exceeding a trillion on fast server chips. The plot below shows how many cells per nanosecond were updated on dense square grids of various sizes (all with rule `B3/S23`) by `step!` with 1 and 4 Julia threads on a laptop with an AMD 7640U:
+`LifeGame.jl` is fast, achieving many tens of billions of cell updates per second on any reasonable modern hardware, and exceeding a trillion on fast server chips. The plot below shows the number of cells updated per nanosecond on dense square grids of various sizes (all with rule `B3/S23`) by `step!` with 1 and 4 Julia threads on a laptop with an AMD 7640U:
 
 ![Benchmark results, large](img/benchmark-results-large.png)
 
-The main lines correspond to the default `dense` algorithm, the dashed lines to the `sparse` algorithm. This chunkwise-sparse algorithm is more efficient for grids with inactive regions, and can be called with `step!(lg, sparse[, serial|parallel])`.
+The prominent lines correspond to the default `dense` algorithm, the dashed lines to the `sparse` algorithm. This chunkwise sparse algorithm is more efficient for grids with inactive regions, and can be called with `step!(lg, sparse[, serial|parallel])`.
 
-`step!` makes good choices about whether to run with multiple threads for small and large cases, but for grids between 62 and a couple hundred cells wide it's worth testing whether your specific case benefits from threading. Use `step!(lg, serial)` to run the serial algorithm, or `step!(lg, parallel)` for the parallel algorithm.
+By default, `step!` usually makes good choices about whether to run with multiple threads, but for grids between 62 and a few hundred cells wide it's worth testing whether your specific case benefits from threading. Use `step!(lg, serial)` to run the serial algorithm, or `step!(lg, parallel)` for the parallel algorithm.
 
 **<details><summary>More</summary>**
 
-Such performance is attained by packing 62 cells into 64-bit operands and updating them simultaneously using bitwise operations; see the extended help for `LifeGrid`, `LifeGame.updatedcluster`, and `LifeGame.updatecolumn!` for algorithm details.
+Such performance is attained by packing many cells into unsigned integer operands (usually 62 cells in 64 bits) and updating them simultaneously using bitwise operations. These operands, which represent portions of rows, are grouped together to form blocks (usually 64 cells tall) that are handled with code amenable to compiler unrolling and vectorization. See the extended help for `LifeGrid`, `LifeGame.updatedcluster`, and `LifeGame.updatecolumn!` for implementation details.
 
-Due to this packing, you'll see significantly better performance for even multiples of 62 at small sizes:
+Per-cell update performance is maximized when a grid's dimensions align with its block size. The difference is pronounced at small sizes:
 
 ![Benchmark results, small](img/benchmark-results-small.png)
 
