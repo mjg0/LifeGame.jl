@@ -78,7 +78,7 @@ using Polyester
 
 include("utils.jl")
 
-include("rules.jl")
+include("LifeRule.jl")
 
 include("storage.jl")
 

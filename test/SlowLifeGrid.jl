@@ -1,4 +1,4 @@
-using LifeGame # LifeGame.LifeRule, LifeGame.step!
+using LifeGame # need to overload LifeGame.step!
 
 
 
@@ -10,8 +10,12 @@ mutable struct SlowLifeGrid <: AbstractMatrix{Bool}
     survivalsums::Vector{Int} # list of neighbor sums that allow cell survival
 
     function SlowLifeGrid(height, width; rule="B3/S23")
-        birthsums, survivalsums = LifeGame.rulesums(LifeGame.LifeRule(rule))
-        return new(zeros(height, width), zeros(height, width), birthsums, survivalsums)
+        rulematch = match(r"^B(\d*)/S(\d*)$", rule)
+
+        birth = [parse(Int, c) for c in first(rulematch.captures)]
+        survival = [parse(Int, c) for c in last(rulematch.captures)]
+
+        return new(zeros(height, width), zeros(height, width), birth, survival)
     end
 
     SlowLifeGrid(grid; kw...) = SlowLifeGrid(size(grid)...; kw...) .= grid
@@ -38,13 +42,14 @@ function LifeGame.step!(lg::SlowLifeGrid)
     region = CartesianIndices(lg.grid)
     @inbounds @simd for I in region
         # Sum the living neighbors of the current cell
-        neighborhood = max(first(region), I - oneunit(I)):min(last(region), I + oneunit(I))
-        neighborsum = sum(@view lg.grid[neighborhood]) - lg.grid[I]
+        I1 = max(first(region), I - oneunit(I))
+        I2 = min(last(region),  I + oneunit(I))
+        neighborsum = sum(@view lg.grid[I1:I2]) - lg.grid[I]
 
         survival = neighborsum in lg.survivalsums
         birth = neighborsum in lg.birthsums
 
-        lg.next[I] = lg.grid[I] && survival || birth
+        lg.next[I] = lg.grid[I] ? survival : birth
     end
 
     # Swap current and next grids and return the updated SlowLifeGrid

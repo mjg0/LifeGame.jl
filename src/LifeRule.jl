@@ -1,37 +1,30 @@
 """
-    Rule{NeighborSums}
-
-A birth or survival rule, where `NeighborSums` stores the numbers for the rule.
-
-`NeighborSums` is an 8-bit unsigned integer, where the `n`th bit being on means that number
-leads to birth or survival. For example, highlife, with the rule B36/S23, would have birth
-rule `Rule{0b00100100}` and survival rule `Rule{0b00000110}`.
-
----
-
     Rule(n::Integer...)
 
-Return a `Rule` for which neighbor sums in `n` lead to birth or survival.
+Return a rule mask for which neighbor sums in `n` lead to birth or survival.
+
+The returned mask is a 16-bit unsigned integer. If the `n`th bit (counting from zero) is on,
+having `n` neighbors leads to birth or survival. For example, highlife, with the rule
+"B36/S23", has birth rule `0b0000000001001000` and survival rule
+`0b0000000000001100`.
 
 # Examples
 
 ```jldoctest
 julia> Rule(1, 2)
-Rule{0x03}
+0x0006
 ```
 """
-struct Rule{NeighborSums} end
-
 function Rule(n...)
-    onbits = zero(UInt8)
+    onbits = zero(UInt16)
     for i in n
-        if i in 1:8
-            onbits |= 0x01 << (i - 1)
+        if i in 0:8
+            onbits |= 0x0001 << i
         else
-            throw(ArgumentError("Invalid rule neighbor sum $i; sums must be in [1, 8]"))
+            throw(ArgumentError("Invalid rule neighbor sum $i; sums must be in [0, 8]"))
         end
     end
-    return Rule{onbits}
+    return onbits
 end
 
 
@@ -45,7 +38,7 @@ A struct holding birth and survival [`Rule`](@ref)s.
 
     LifeRule(b, s)
 
-Return a `LifeRule` with birth rule `Rule(b...)` and survival rule `Rule(s...)`.
+Return a `LifeRule` with birth rule mask `Rule(b...)` and survival rule mask `Rule(s...)`.
 """
 struct LifeRule{Birth,Survival} end
 
@@ -74,21 +67,15 @@ end
 
 """
     rulesums(N::Integer)
-    rulesums(::Type{Rule{N}})
-    rulesums(::Type{LifeRule{B, S}})
 
 Return a vector of numbers for which the given rule specifies birth or survival.
 
-`N` is a `UInt8`, each bit corresponding to a number 1 to 8; the numbers corresponding to on
-bits are returned.
+`N` is a `UInt16`, each bit corresponding to a number 0 to 8; the numbers corresponding to
+on bits are returned.
 
 If a `LifeRule` is provided, the birth and survival sums, respectively, are returned as a
 tuple.
 """
-rulesums(N::Integer) = [i for i = 1:8 if N >> (i - 1) & 0x01 == 0x01]
-
-rulesums(::Rule{N}) where {N} = rulesums(N)
-rulesums(::Type{R}) where {R<:Rule} = rulesums(R())
+rulesums(N::Integer) = [i for i in 0:8 if (N >> i) & 0x01 == 0x01]
 
 rulesums(::LifeRule{B,S}) where {B,S} = rulesums(B), rulesums(S)
-rulesums(::Type{R}) where {R<:LifeRule} = rulesums(R())

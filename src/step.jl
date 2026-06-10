@@ -16,6 +16,13 @@ struct sparse <: Sparsity end
 
 
 
+# Check whether a rule causes birth with zero surviving neighbors
+function haszerobirth(::Type{LifeRule{B,S}}) where {B,S}
+    return B & 0x0001 == 0x0001
+end
+
+
+
 """
     step!(lg::LifeGrid, sparseordense, serialorparallel)
     step!(lg::LifeGrid, serialorparallel, sparseordense)
@@ -32,6 +39,9 @@ All cells outside of the grid boundary are fixed at zero.
     ::Type{Sp},
     ::Type{Th},
 ) where {R,C,H,Tall,Wide,Sp<:Sparsity,Th<:Threaded}
+    # If B0 is part of the rule, the sparse algorithm can't be used
+    sparseordense = Sp === sparse && haszerobirth(R) ? dense : Sp
+
     # Only parallelize if there's a need
     if Wide && Th === parallel
         # Manual thread bounds so buffers don't get mixed
@@ -43,12 +53,12 @@ All cells outside of the grid boundary are fixed at zero.
             J1 = colsperthread * (tid - 1) + 1
             J2 = min(colsperthread * tid, size(lg.grid, 2))
             for J = J1:J2
-                updatecolumn!(lg, J, tid, Sp)
+                updatecolumn!(lg, J, tid, sparseordense)
             end
         end
     else
         @inbounds for J in axes(lg.grid, 2)
-            updatecolumn!(lg, J, 1, Sp)
+            updatecolumn!(lg, J, 1, sparseordense)
         end
     end
 
@@ -57,7 +67,7 @@ All cells outside of the grid boundary are fixed at zero.
     lg.halos.currentright, lg.halos.nextright = lg.halos.nextright, lg.halos.currentright
 
     # Update sparse activity trackers
-    if Sp == sparse
+    if sparseordense == sparse
         lg.changed.current, lg.changed.next = lg.changed.next, lg.changed.current
         lg.changed.allcurrent = false
     else

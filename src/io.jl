@@ -1,4 +1,4 @@
-const MAGIC_BYTES = 0x4546494C
+const MAGIC_BYTES = 0x3246494C
 
 
 
@@ -7,16 +7,16 @@ clustertype(::LifeGrid{R,C,H,Tall,Wide}) where {R,C,H,Tall,Wide} = C
 
 
 # Read and write LifeRules to/from streams
-function Base.write(io::IO, ::LifeRule{Rule{B},Rule{S}}) where {B,S}
-    written = write(io, B)
-    written += write(io, S)
+function Base.write(io::IO, ::LifeRule{B,S}) where {B,S}
+    written = write(io, htol(B))
+    written += write(io, htol(S))
     return written
 end
 
 function LifeRule(io::IO)
-    B = read(io, UInt8)
-    S = read(io, UInt8)
-    return LifeRule{Rule{B},Rule{S}}()
+    B = ltoh(read(io, UInt16))
+    S = ltoh(read(io, UInt16))
+    return LifeRule{B,S}()
 end
 
 
@@ -30,7 +30,7 @@ The format is as follows (all in binary, little-endian where applicable):
 
 1. 4 magic bytes indicating a non-corrupted `LifeGrid` file/stream
 1. The size, 2 64-bit signed integers (height, then width)
-1. The rule, 2 bytes representing the birth and survival rules respectively
+1. The rule, 2 little-endian `UInt16`s representing the birth and survival rules
 1. The data grid underpinning `lg`'s cells, packed bits in row-major order
 
 The grid bits are packed with no padding between rows, so a row may begin mid-byte. The grid

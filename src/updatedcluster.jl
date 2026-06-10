@@ -53,22 +53,23 @@ end
 
 
 """
-    alivebits(bit1, bit2, bit3, bit4, ::Rule)
+    alivebits(bit1, bit2, bit3, bit4, ::Val)
 
 Return a bitmask indicating which cells will be alive in the next generation.
 
 The bits that remain alive are determined according to the bitwise sum of neighbor cells
-represented by `bit*` (see [`bitsums`](@ref)) and the provided [`Rule`](@ref).
+represented by `bit*` (see [`bitsums`](@ref)) and the provided rule mask.
 """
 @generated function alivebits(
     bit1::T,
     bit2::T,
     bit3::T,
     bit4::T,
-    ::Type{Rule{N}},
+    ::Val{N},
 ) where {T,N}
-    # "On" bits for possible sums of 1 through 8
+    # "On" bits for possible sums of 0 through 8
     onbits = (
+        :(~bit1 & ~bit2 & ~bit3 & ~bit4), # 0: no bits
         :(bit1 & ~bit2 & ~bit3 & ~bit4), # 1: 1st bit
         :(~bit1 & bit2 & ~bit3 & ~bit4), # 2: 2nd bit
         :(bit1 & bit2 & ~bit3 & ~bit4), # 3: 1st, 2nd bits
@@ -76,11 +77,11 @@ represented by `bit*` (see [`bitsums`](@ref)) and the provided [`Rule`](@ref).
         :(bit1 & ~bit2 & bit3 & ~bit4), # 5: 1st, 3rd bits
         :(~bit1 & bit2 & bit3 & ~bit4), # 6: 2nd, 3rd bits
         :(bit1 & bit2 & bit3 & ~bit4), # 7: 1st, 2nd, 3rd bits
-        :(~bit1 & ~bit2 & ~bit3 & bit4),
-    ) # 8: 4th bit
+        :(~bit1 & ~bit2 & ~bit3 & bit4), # 8: 4th bit
+    )
 
     # Generator with the on bits of cells that should stay alive
-    alives = (onbit for (i, onbit) in enumerate(onbits) if i in rulesums(N))
+    alives = (onbit for (i, onbit) in zip(0:8, onbits) if i in rulesums(N))
 
     # Return the appropriate pieces OR'ed together, or zero(T) if the rule is "always die"
     return isempty(alives) ? :(zero(T)) : Expr(:call, :|, alives...)
@@ -137,18 +138,16 @@ As an example, the specialization for the rule `B3/S4` might look like:
 
 ```julia
 function LifeGame.updatedcluster(above, current, below,
-                                 ::LifeGame.LifeRule{LifeGame.Rule(1), LifeGame.Rule(2)})
+                                 ::LifeGame.LifeRule{LifeGame.Rule(3), LifeGame.Rule(4)})
     # Get the bitwise sum of the neighbor cells of each bit in `current`
     1s_place, 2s_pace, 4s_place, 8s_place = LifeGame.bitsums(above, current, below)
 
-    # Kill all cells but those with a neighbor sum of 4
-    current &= ~1s_place & ~2s_place & 4s_place & ~8s_place
-
-    # Birth cells that had 3 neighbors
-    current |= 1s_place & 2s_place & ~4s_place & ~8s_place
+    # Keep live cells that had 4 neighbors, and birth dead cells that had 3
+    survival = current & ~1s_place & ~2s_place & 4s_place & ~8s_place
+    birth = ~current & 1s_place & 2s_place & ~4s_place & ~8s_place
 
     # Return the updated cluster
-    return current
+    return survival | birth
 end
 ```
 """
@@ -156,8 +155,9 @@ function updatedcluster(above, current, below, ::LifeRule{B,S}) where {B,S}
     bit1, bit2, bit3, bit4 = bitsums(above, current, below)
 
     # Update current according to the survival and birth rules
-    current &= alivebits(bit1, bit2, bit3, bit4, S) # survival
-    current |= alivebits(bit1, bit2, bit3, bit4, B) # birth
+    survival = alivebits(bit1, bit2, bit3, bit4, Val(S))
+    birth = alivebits(bit1, bit2, bit3, bit4, Val(B))
+    current = current & survival | ~current & birth
 
     # Return the updated cluster
     return current
@@ -179,7 +179,7 @@ Create a specialization of [`updatedcluster`](@ref) for the given rule.
 As an example, the `updatedcluster` specialization for `B2/S` is created with:
 
 ```julia
-@specialize_updatedcluster [2] [] ~bit1 & bit2 & ~bit3
+@specialize_updatedcluster [2] [] ~current & ~bit1 & bit2 & ~bit3
 ```
 """
 macro specialize_updatedcluster(birth, survival, body)
@@ -201,10 +201,14 @@ end
 @specialize_updatedcluster [3] [2, 3] (current | bit1) & bit2 & ~bit3
 
 # B36/S23 (highlife)
-@specialize_updatedcluster [3, 6] [2, 3] current & bit2 & ~bit3 | bit2 & (bit1 ⊻ bit3)
+@specialize_updatedcluster [3, 6] [2, 3] (
+    bit2 & ~bit3 & (current | bit1) | ~current & ~bit1 & bit2 & bit3
+)
 
 # B2/S (seeds)
-@specialize_updatedcluster [2] [] ~bit1 & bit2 & ~bit3
+@specialize_updatedcluster [2] [] ~current & ~bit1 & bit2 & ~bit3
 
 # B234/S (Persian rug)
-@specialize_updatedcluster [2, 3, 4] [] bit2 & ~bit3 | ~bit1 & ~bit2 & bit3
+@specialize_updatedcluster [2, 3, 4] [] (
+    ~current & (bit2 & ~bit3 | ~bit1 & ~bit2 & bit3)
+)

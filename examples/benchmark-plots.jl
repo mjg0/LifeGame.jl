@@ -23,9 +23,12 @@ end
 function benchmarkstep(sidelengths, threadmode, sparsity)
     par = threadmode == :serial ? serial : parallel
     # Warm up the CPU for a minute
-    t = time()
-    while time() - t < 10
-        step!(LifeGrid(10_000, 10_000), par)
+    let
+        lg = rand!(LifeGrid(50_000, 50_000))
+        t = time()
+        while time() - t < 60
+            step!(lg, par)
+        end
     end
 
     return [

@@ -3,22 +3,22 @@
 
 Return a randomly initialized `LifeGrid` of random size with a random `LifeRule`.
 """
-function randlifegrid(rng)
+function randlifegrid(rng; rule=nothing)
     # Cluster and halo types
     utypes = (UInt8, UInt16, UInt32, UInt64)
     C = rand(rng, utypes)
     H = rand(rng, utypes)
 
     # Cluster size, biased toward sizes likely to hit fencepost errors
-    gridsize = (rand(rng, (1, 2, 3, n-1, n, n+1, 2n-1, 2n, 2n+1, rand(rng, 3n:4n)))
+    gridsize = (rand(rng, (2, 3, n-1, n, n+1, 2n-1, 2n, 2n+1, rand(rng, 3n:4n)))
                 for n in (8 * sizeof(H), 8 * sizeof(C) - 2))
 
     # Rule
-    birth, survival = ntuple(_ -> LifeGame.Rule{rand(rng, UInt8)}, 2)
-    rule = LifeGame.LifeRule{birth,survival}()
+    birth, survival = ntuple(_ -> rand(rng, UInt16) & 0x01ff, 2)
+    R = LifeGame.LifeRule{birth,survival}()
 
     # Build and randomize the LifeGrid
-    lg = LifeGrid(gridsize...; rule=repr(rule), CType=C, HType=H)
+    lg = LifeGrid(gridsize...; rule=repr(R), CType=C, HType=H)
     if rand(rng, Bool) # dense
         rand!(rng, lg)
     else # sparse

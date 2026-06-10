@@ -1,3 +1,13 @@
+@testset "LifeRule constructor" begin
+    rule = LifeGame.LifeRule("B024/S056")
+    @test repr(rule) == "B024/S056"
+    @test LifeGame.rulesums(rule) == ([0, 2, 4], [0, 5, 6])
+    @test LifeGame.Rule(0, 8) == 0x0101
+    @test_throws ArgumentError LifeGame.Rule(9)
+end
+
+
+
 @testset "LifeGrid constructor" begin
     rng = MersenneTwister(1)
 

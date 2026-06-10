@@ -4,7 +4,11 @@ begin
     N = 100
     iters = 100
 
-    grids = ntuple(_ -> randlifegrid(rng), N)
+    # Ensure we get the rules created by @specialize_updatedcluster
+    specialized = (LifeGrid(rand(rng, Bool, rand(rng, 10:200), rand(rng, 10:200)); rule=R)
+                   for R in ("B3/S23", "B36/S23", "B2/S", "B234/S"))
+
+    grids = (specialized..., ntuple(_ -> randlifegrid(rng), N - length(specialized))...)
     references = ntuple(i -> SlowLifeGrid(grids[i]; rule=repr(rule(grids[i]))), N)
 
     @testset "step!" begin
