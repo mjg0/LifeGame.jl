@@ -32,7 +32,7 @@ Update `lg` one generation according to the [`rule`](@ref) associated with it.
 All cells outside of the grid boundary are fixed at zero.
 
 `sparseordense` can be `sparse` or `dense`; `serialorparallel` can be `serial` or
-`parallel`. They default to `sparse` and `parallel` respectively.
+`parallel`. They default to `dense` and `parallel` respectively.
 """
 @inline function step!(
     lg::LifeGrid{R,C,H,Tall,Wide},
